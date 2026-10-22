@@ -17,11 +17,12 @@ subtitles, dialogue choices, inventory (with the tutorial hints), journal,
 save/load and quicksave, crossfade transitions, the original keyboard shortcuts
 and gamma correction, and the sky/fog/rain/night/candle/lightning effects. Text
 (feedback, subtitles including the DC intro's .srt, choices, journal) uses the
-original's layout and monospaced font. Not yet: the "alternate control"
-mouse-look option, the original menu layout, and the 2006 release (Lua 5.0
-scripts).
-`scream --api-status` lists the state of all 87 API functions. A full
-play-through hasn't been done yet, so expect script-specific bugs.
+original's layout and monospaced font. The original 2006 release runs too (its
+Lua 5.0 scripts are translated to 5.1 bytecode as they load). Both campaigns of
+the Director's Cut and the 2006 game have been played through to their endings
+by the automated player (`--explore`). Not yet: the "alternate control"
+mouse-look option and the original menu layout.
+`scream --api-status` lists the state of all 87 API functions.
 
 See [NOTES.md](NOTES.md) for the reverse-engineering notes.
 
@@ -46,7 +47,12 @@ the `.res` archives. For the updated Director's Cut:
 ```
 
 Later `--data` directories override earlier ones, so the disc 2 update's
-`scratches.sc` and `update.res` (HD textures) take precedence.
+`scratches.sc` and `update.res` (HD textures) take precedence. For the 2006
+release (scripts and `scream.res` from the installer, `scratches.res` from the disc):
+
+```sh
+./build/scream --data extracted/2006/install --data extracted/2006/disc
+```
 
 ## Running
 

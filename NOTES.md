@@ -402,6 +402,17 @@ ECX), so Ghidra's decompiler hides arguments; read the disassembly alongside. Sc
 - Field of view is 45° vertical (reset every frame, `0x407c30`); SC_DREAM drifts it between
   35° and 55° at 0.005°/frame. (SC_DEF_FOV 53 in scream.sc is not what the renderer uses.)
 
+## 2006 release
+
+- Its scripts are Lua 5.0 bytecode; `src/lua50.cpp` translates each chunk to 5.1 at load
+  (layout, instruction fields, RK encoding, opcode numbers; 5.0 TEST = 5.1 TESTSET). The
+  shipped scripts use 14 opcodes (no loops, table constructors or varargs) and constants
+  up to RK index 106, and call only `string.format` from the libraries, so 5.0/5.1 library
+  differences don't arise.
+- Crawl: 2352 tasks, clean apart from the unreachable duplicate hall phone zoom (the DC's two
+  script bugs aren't in the 2006 script). Explorer: plays to `finale()` (~37k actions) with
+  the same hints as the DC (same handlers, combination and phone numbers).
+
 ## Porting strategy
 
 Embed Lua 5.1 and run the original `scream.sc` + `scratches.sc` unmodified; reimplement the
@@ -414,5 +425,9 @@ saves). Ghidra on `scream.exe` covers semantics the scripts don't reveal.
 - Exactly when the two zoom sounds play (`0x416120`, `0x4160d0`).
 - Playlist per-track repeat count and fade-time fields.
 - Whether `scTimerCreate` timers are cancelled on leaving the node (currently assumed).
-- Loading the 2006 release: its scripts are Lua 5.0 bytecode, which Lua 5.1 cannot load.
-- What the 2006 patch changed.
+- What the 2006 executable (and its patch) does differently from the DC one; we run the 2006
+  scripts on the DC engine model. One known case: the 2006 `newGame` calls `changeTime(9)`
+  before entering a room, so `changeTime`'s `scGet(SC_ROOM)` is empty and its
+  `scBind(SC_ROOM, aux)` finds nothing (the DC swapped the two calls). In the DC exe that
+  `scGet` would be the fatal "GetCurr: target not bound", so the 2006 exe must differ there.
+- Whether the inventory screen opens/closes with a crossfade.

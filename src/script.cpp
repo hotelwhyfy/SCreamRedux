@@ -1,5 +1,7 @@
 #include "script.hpp"
 
+#include "lua50.hpp"
+
 #include <SDL3/SDL_log.h>
 
 #include <algorithm>
@@ -27,6 +29,14 @@ bool ScriptHost::runFile(const std::filesystem::path& path) {
     }
     std::string buf((std::istreambuf_iterator<char>(f)), {});
     std::string chunk = "@" + path.filename().string();
+    if (lua50::isChunk(buf)) {  // the 2006 release
+        try {
+            buf = lua50::translate(buf);
+        } catch (const std::exception& e) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s: %s", path.string().c_str(), e.what());
+            return false;
+        }
+    }
 
     lua_pushcfunction(L_, traceback);
     if (luaL_loadbuffer(L_, buf.data(), buf.size(), chunk.c_str()) != 0 || lua_pcall(L_, 0, 0, -2) != 0) {
