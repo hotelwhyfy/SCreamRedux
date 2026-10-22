@@ -167,6 +167,13 @@ Verified against the shipped scripts and data while building the engine (`src/`)
   (`scSwitch(SC_ZOOM, x)` then `scBind(SC_OBJECT, …)` / `scTextureUpdate(SC_ZOOM, …)`).
 - `scBind(SC_OBJECT, name)` searches the bound node in node state (4000), the bound zoom in
   zoom state (0xfa2), and finds nothing in any other state (inventory, journal, ...).
+- One object is bound at a time (an index into the global object table). `scBind(SC_OBJECT,
+  name)` takes the first object of that name in the view (creation order); a click binds the
+  clicked object itself (`0x414343`, EDX = the hovered index); `scEnable`/`scDisable` and the
+  builder calls change only that object. Objects often share a name (one hotspot per cube face),
+  and it matters: greenhouse-int/n7 has two `hose` hotspots (`grabHose1`, `grabHose2`), each
+  disabling itself; disabling both on the first grab makes `hose_quarry`, the shovel and the
+  ending unreachable.
 - Nodes are found in the bound room, but zooms by name across all rooms, the first created
   winning — for `scBind(SC_ZOOM)` and `scSwitch(SC_ZOOM)` alike. Duplicate zoom names: `phone`
   / `phone-pick` (house-lobby and house-hall: the hall's version, with a clock hotspot, is
@@ -182,8 +189,21 @@ Verified against the shipped scripts and data while building the engine (`src/`)
 
 - An automated player limited to player actions (hotspot clicks, item use where a reaction
   exists, dialogue options), retrying everything whenever the game state changes and learning
-  scripted doors/stairs as navigation. The Last Visit plays through to `finale_dc` (~550
-  actions, 50 states).
+  scripted doors/stairs as navigation. The Last Visit plays through to `finale_dc` (~250
+  actions, 34 states).
+- "State" is progress only: script globals, enabled hotspots, inventory, journal entries,
+  choices. Location, last-visited nodes, textures, effect flags and which option was picked
+  last are left out, or every walk and light switch would count as progress.
+- Planning: the nearest action never done anywhere first, else the nearest one not done in this
+  state; when nothing is left, backtrack by replaying recorded actions to the nearest state left
+  with something untried (a handle that cycles through four positions). Routes follow the zoom
+  stack. A stall (no action in 100000 frames) and the action cap end the run with a report.
+- Clue puzzles (the studio box combination, Bailey's and Blake's phone numbers) take
+  `--explore-hints FILE`, kept outside the repository (it is game content); format at the top
+  of `src/explore.cpp`.
+- Script quirks the main campaign has: relighting the passage candle sets `jerry_st` back to 17
+  (calling Jerry again sets 18); turning the greenhouse faucet back on re-arms the glitter timer,
+  which re-enables the small key in the pond (each grab is another hour on the clock).
 
 ### Media
 
@@ -211,7 +231,11 @@ ECX), so Ghidra's decompiler hides arguments; read the disassembly alongside. Sc
   by name" callback (used by scOnClick SC_CUSTOM, timers, choices, reactions, room hooks).
 - Engine states in the main loop (`0x416a10`) are the `SC_ST*` constants (4000 node,
   4001 video, 4002 zoom, 4003 inventory, 4004 overlay, 4005 menu, …).
-- `scLock`/`scUnlock`: boolean at `0x48bc0c` (also set/restored around internal operations).
+- `scLock`/`scUnlock`: boolean at `0x48bc0c` (`0x412550`/`0x412560`). Every capture for a
+  transition sets it to 1 and then to 0 (not restored), so switches, journal/menu changes,
+  camera keys and overlay dismissal also unlock; the scripts rely on this (many `scLock()`
+  branches end with `scSwitch(SC_ZOOMOUT, "")` and no `scUnlock`). The cutscene-end capture
+  leaves it alone.
 - `scWait`/`scGo`: wait mode `0x48bc10` — the cursor (wait cursor) is drawn while locked; only
   if SC_WAIT is enabled (`0x4df8de4`, default on, key 25 in scEnable/scDisable).
 - `scMotion`/`scStill`: `0x48bc08` gates camera input. `scSleep` (`0x4124a0`) clears it and

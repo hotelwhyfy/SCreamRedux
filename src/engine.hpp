@@ -38,6 +38,7 @@ struct Options {
     bool turbo = false;         // fast-forward for automated runs: no audio or video, fast clock
     bool crawl = false;         // visit every room/view/object and report problems (crawl.cpp)
     bool explore = false;       // play the game automatically until stuck or finished (explore.cpp)
+    std::string exploreHints;   // --explore-hints: puzzle solutions for the explorer (explore.cpp)
 };
 
 class Engine {
@@ -138,7 +139,7 @@ public:
     static constexpr int kOrigW = 1024, kOrigH = 768;
     bool feedbackShown() const { return feedback_.count > 0; }
     // Start a crossfade from what is on screen now (0x407ad0; 0x407b20 starts at 0.75).
-    void beginTransition(float progress = 0);
+    void beginTransition(float progress = 0, bool unlock = true);
     bool hintsOn() const;  // SC_HINTS (0x4df8d38)
     void clearFeedback() { feedback_.count = 0; }
     void loadSubtitles(const std::string& file);

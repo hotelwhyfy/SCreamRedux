@@ -41,7 +41,8 @@ void usage() {
         "  --turbo           fast-forward: no audio or video, game time runs 30x\n"
         "  --crawl           click every object, use every item reaction, run every choice\n"
         "                    and dialogue from the start state; report warnings and errors\n"
-        "  --explore         with --game: play automatically until stuck or finished\n");
+        "  --explore         with --game: play automatically until stuck or finished\n"
+        "  --explore-hints F puzzle solutions for --explore (format in explore.cpp)\n");
 }
 
 // Decode every image, sound and video once; report anything that fails.
@@ -139,6 +140,7 @@ int main(int argc, char** argv) {
         else if (a == "--turbo") opts.turbo = true;
         else if (a == "--crawl") opts.crawl = opts.turbo = true;
         else if (a == "--explore") opts.explore = opts.turbo = true;
+        else if (a == "--explore-hints") opts.exploreHints = next(), opts.explore = opts.turbo = true;
         else if (a == "-h" || a == "--help") { usage(); return 0; }
         else { std::fprintf(stderr, "unknown option %s\n", a.c_str()); usage(); return 2; }
     }

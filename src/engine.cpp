@@ -146,7 +146,7 @@ bool Engine::switchRoom(const std::string& name) {
     world.bound.room = r;
     world.bound.node = world.bound.view = node;
     world.bound.zoom = nullptr;
-    world.bound.objects.clear();
+    world.bound.object = nullptr;
     // Timers created with scTimerCreate belong to the location they were made in.
     std::erase_if(timers_, [](const Timer& t) { return !t.global; });
     if (!r->onEnter.empty())
@@ -165,7 +165,7 @@ bool Engine::switchNode(const std::string& name) {
     node = n;
     world.bound.room = room;
     world.bound.node = world.bound.view = n;
-    world.bound.objects.clear();
+    world.bound.object = nullptr;
     zooms.clear();
     overlay = nullptr;
     std::erase_if(timers_, [](const Timer& t) { return !t.global; });
@@ -187,7 +187,7 @@ bool Engine::switchZoom(const std::string& name) {
     }
     beginTransition();
     world.bound.zoom = world.bound.view = z;
-    world.bound.objects.clear();
+    world.bound.object = nullptr;
     zooms.push_back(z);
     overlay = nullptr;
     playZoomAudio(z, sc::ZOOM);
@@ -267,7 +267,7 @@ void Engine::zoomOut() {
         // back to the node, nothing is rebound.
         if (!zooms.empty()) {
             world.bound.zoom = world.bound.view = zooms.back();
-            world.bound.objects.clear();
+            world.bound.object = nullptr;
         }
     }
 }
@@ -549,11 +549,17 @@ bool Engine::playCutscene(const std::string& file) {
 
 void Engine::stopCutscene() {
     if (video_)
-        beginTransition();  // from the last video frame (0x416d13)
+        beginTransition(0, false);  // from the last video frame (0x416d13), which leaves the lock alone
     video_.reset();
 }
 
-void Engine::beginTransition(float progress) {
+void Engine::beginTransition(float progress, bool unlock) {
+    // scream.exe sets its lock flag (0x48bc0c) while it renders the old screen
+    // for the capture and clears it afterwards, so every switch, journal/menu
+    // change, camera key and overlay dismissal also releases scLock. Scripts
+    // rely on it (scLock() ... scSwitch(SC_ZOOMOUT, "") with no scUnlock).
+    if (unlock)
+        locked = false;
     if (!window_ || capturing_ || opts.turbo)
         return;
     capturing_ = true;

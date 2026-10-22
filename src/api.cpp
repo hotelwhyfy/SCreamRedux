@@ -88,12 +88,13 @@ int scGet(lua_State* L) {
     return 1;
 }
 
-// scEnable/scDisable(SC_OBJECT) toggle the bound objects; other keys are
+// scEnable/scDisable(SC_OBJECT) toggle the bound object (only that one: 0x40fa60
+// sets +0x34 of the single bound object); other keys are
 // effect flags (SC_SKY, SC_RAIN, SC_CANDLE, SC_WAIT, ...).
 int setEnabled(lua_State* L, bool on) {
     int key = argInt(L, 1);
     if (key == sc::OBJECT) {
-        for (Object* o : E->world.bound.objects) o->enabled = on;
+        if (Object* o = E->world.bound.object) o->enabled = on;
         return 0;
     }
     if (on) E->flags.insert(key);
@@ -154,7 +155,7 @@ int scTextureUpdate(lua_State* L) { return scTexture(L); }
 int scPlace(lua_State* L) {
     Rect r{argInt(L, 1), argInt(L, 2), argInt(L, 3), argInt(L, 4)};
     int face = argInt(L, 5);
-    for (Object* o : E->world.bound.objects) {
+    if (Object* o = E->world.bound.object) {
         o->rect = r;
         o->face = face;
     }
@@ -162,19 +163,19 @@ int scPlace(lua_State* L) {
 }
 
 int scOnHover(lua_State* L) {
-    for (Object* o : E->world.bound.objects) o->cursor = argInt(L, 1);
+    if (Object* o = E->world.bound.object) o->cursor = argInt(L, 1);
     return 0;
 }
 
 int scOnClick(lua_State* L) {
     Action a = readAction(L, 1);
-    for (Object* o : E->world.bound.objects) o->click = a;
+    if (Object* o = E->world.bound.object) o->click = a;
     return 0;
 }
 
 int scReaction(lua_State* L) {
     Reaction r{argStr(L, 1), readAction(L, 2)};
-    for (Object* o : E->world.bound.objects) o->reactions.push_back(r);
+    if (Object* o = E->world.bound.object) o->reactions.push_back(r);
     return 0;
 }
 

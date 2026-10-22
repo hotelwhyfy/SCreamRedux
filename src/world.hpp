@@ -118,7 +118,7 @@ public:
         View* node = nullptr;
         View* zoom = nullptr;
         View* view = nullptr;           // whichever of node/zoom was bound last
-        std::vector<Object*> objects;   // all objects sharing the bound name
+        Object* object = nullptr;       // one object (0x402ce0 binds a single index)
         Item* item = nullptr;
         Dialogue* dialogue = nullptr;
         Choice* choice = nullptr;

@@ -45,7 +45,7 @@ bool World::create(int kind, const std::string& name) {
     case sc::ROOM:
         bound.room = createNamed(rooms, name);
         bound.node = bound.zoom = bound.view = nullptr;
-        bound.objects.clear();
+        bound.object = nullptr;
         return true;
     case sc::NODE:
     case sc::ZOOM: {
@@ -59,7 +59,7 @@ bool World::create(int kind, const std::string& name) {
         list.push_back(std::move(v));
         (kind == sc::NODE ? bound.node : bound.zoom) = p;
         bound.view = p;
-        bound.objects.clear();
+        bound.object = nullptr;
         if (kind == sc::ZOOM)
             zoomOrder.push_back(p);
         return true;
@@ -69,7 +69,7 @@ bool World::create(int kind, const std::string& name) {
             return false;
         auto o = std::make_unique<Object>();
         o->name = name;
-        bound.objects = {o.get()};
+        bound.object = o.get();
         bound.view->objects.push_back(std::move(o));
         return true;
     }
@@ -88,14 +88,14 @@ bool World::bind(int kind, const std::string& name) {
         if (Room* r = room(name)) {
             bound.room = r;
             bound.node = bound.zoom = bound.view = nullptr;
-            bound.objects.clear();
+            bound.object = nullptr;
             return true;
         }
         return false;
     case sc::ZOOM:
         if (View* z = zoom(name)) {
             bound.zoom = bound.view = z;
-            bound.objects.clear();
+            bound.object = nullptr;
             return true;
         }
         return false;
@@ -107,7 +107,7 @@ bool World::bind(int kind, const std::string& name) {
             return false;
         (kind == sc::NODE ? bound.node : bound.zoom) = v;
         bound.view = v;
-        bound.objects.clear();
+        bound.object = nullptr;
         return true;
     }
     case sc::OBJECT: {
@@ -115,8 +115,11 @@ bool World::bind(int kind, const std::string& name) {
         View* v = scope == Scope::Node ? bound.node : scope == Scope::Zoom ? bound.zoom : scope == Scope::Build ? bound.view : nullptr;
         if (!v)
             return false;
-        bound.objects = v->find(name);
-        return !bound.objects.empty();
+        // The first object of that name in the view (0x403fd0 scans the global
+        // object table, which is in creation order, for one in the view).
+        auto found = v->find(name);
+        bound.object = found.empty() ? nullptr : found.front();
+        return bound.object != nullptr;
     }
     case sc::ITEM:
         if (auto it = items.find(name); it != items.end()) { bound.item = it->second.get(); return true; }
@@ -150,14 +153,14 @@ void World::end(int kind) {
         bound.node = nullptr;
         bound.view = nullptr;
     }
-    bound.objects.clear();
+    bound.object = nullptr;
 }
 
 void World::bindClicked(Room* room, View* view, Object* object) {
     bound.room = room;
     bound.view = view;
     (view && view->isZoom ? bound.zoom : bound.node) = view;
-    bound.objects = view && object ? view->find(object->name) : std::vector<Object*>{};
+    bound.object = view ? object : nullptr;  // the clicked object itself (0x414343)
 }
 
 View* World::zoom(const std::string& name) const {
