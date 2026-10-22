@@ -72,7 +72,7 @@ struct Item {
 
 struct DialogueLine {
     std::string voice, text;
-    int flag = 0;  // third arg of scScriptAdd; meaning unknown
+    int flag = 0;  // third arg of scScriptAdd: 1 = hint line, played only with SC_HINTS on
 };
 
 struct Dialogue {

@@ -66,6 +66,13 @@ int scSet(lua_State* L) {
     int key = argInt(L, 1);
     if (lua_type(L, 2) == LUA_TSTRING) E->settings[key] = argStr(L, 2);
     else E->settings[key] = argNum(L, 2);
+    // The speeds take SC_LO/SC_MED/SC_HI as 25/50/75, or a value (0x40fde0).
+    if (key == sc::TXT_SPEED || key == sc::CAM_SPEED) {
+        double v = argNum(L, 2);
+        if (v == sc::LO) E->settings[key] = 25.0;
+        else if (v == sc::MED) E->settings[key] = 50.0;
+        else if (v == sc::HI) E->settings[key] = 75.0;
+    }
     return 0;
 }
 
@@ -258,8 +265,8 @@ int scFont(lua_State* L) { E->font = argStr(L, 1); return 0; }
 int scFeedback(lua_State* L) { E->feedback(argStr(L, 1)); return 0; }
 int scFeedbackEx(lua_State* L) { E->feedback(argStr(L, 1), argStr(L, 2)); return 0; }
 
-int scLoadSubtitle(lua_State* L) { E->subtitles = argStr(L, 1); return 0; }
-int scUnloadSubtitle(lua_State* L) { E->subtitles.clear(); return 0; }
+int scLoadSubtitle(lua_State* L) { E->loadSubtitles(argStr(L, 1)); return 0; }
+int scUnloadSubtitle(lua_State* L) { E->unloadSubtitles(); return 0; }
 
 // ---------------------------------------------------------------- inventory
 
@@ -293,8 +300,8 @@ int scInventoryRemove(lua_State* L) {
 
 // ---------------------------------------------------------------- journal / hints / menu
 
-int scJournalAdd(lua_State* L) { E->journal[argInt(L, 1)] = argStr(L, 2); return 0; }
-int scJournalClear(lua_State* L) { E->journal.clear(); return 0; }
+int scJournalAdd(lua_State* L) { E->journalAdd(argInt(L, 1), argStr(L, 2)); return 0; }
+int scJournalClear(lua_State* L) { E->journalClear(); return 0; }
 int scJournalSet(lua_State* L) {
     E->journalConfig = {argStr(L, 1), argStr(L, 2), argStr(L, 3), argStr(L, 4), argStr(L, 5), E->world.bound.item};
     return 0;
@@ -323,29 +330,35 @@ int scScriptAdd(lua_State* L) {
     return 0;
 }
 
-// Plays each line (subtitle + voice) in turn and blocks the handler until the
-// last one ends. The wait predicate advances the lines as voices finish.
+// As 0x4156a0: the music is turned down by 0.25 for the whole dialogue; each
+// line plays its voice and shows its text, and the next line starts when the
+// voice ends. Lines added with flag 1 are hints, played only while SC_HINTS is on.
 int scScriptGo(lua_State* L) {
     auto it = E->world.dialogues.find(argStr(L, 1));
     if (it == E->world.dialogues.end()) { warn("scScriptGo", "no script " + argStr(L, 1)); return 0; }
     const Dialogue* d = it->second.get();
-    if (d->lines.empty()) return 0;
-    E->feedback(d->lines[0].text, d->lines[0].voice);
-    auto next = std::make_shared<size_t>(1);
-    return E->script.wait(L, [d, next] {
+    E->sound.duckMusic(-0.25f);
+    auto next = std::make_shared<size_t>(0);
+    auto finished = [d, next] {
         if (E->sound.voicePlaying()) return false;
-        if (*next >= d->lines.size()) {
-            E->feedback("");
-            return true;
+        while (*next < d->lines.size()) {
+            const DialogueLine& line = d->lines[(*next)++];
+            if (line.flag != 0 && !E->hintsOn()) continue;
+            E->feedback(line.text, line.voice);
+            return false;
         }
-        const DialogueLine& line = d->lines[(*next)++];
-        E->feedback(line.text, line.voice);
-        return false;
-    });
+        E->sound.duckMusic(0.25f);
+        E->feedback("");
+        return true;
+    };
+    if (finished()) return 0;
+    return E->script.wait(L, finished);
 }
 
 int scChoiceAdd(lua_State* L) {
-    if (Choice* c = E->world.bound.choice) c->options.emplace_back(argStr(L, 1), argStr(L, 2));
+    Choice* c = E->world.bound.choice;
+    if (c && c->options.size() < 16)  // the original holds 16 options (0x403e30)
+        c->options.emplace_back(argStr(L, 1), argStr(L, 2));
     return 0;
 }
 int scChoiceGo(lua_State* L) { E->showChoice(argStr(L, 1)); return 0; }
@@ -487,7 +500,7 @@ const Entry kEntries[] = {
     FN(scJournalSet, S::Done, "book opens from the bound item"),
     FN(scJournalShow, S::Done, ""),
     FN(scLoadSettings, S::Done, "scream.cfg keys; display/audio keys recorded only"),
-    FN(scLoadSubtitle, S::Partial, "name stored; needs .srt parsing"),
+    FN(scLoadSubtitle, S::Done, ".srt cues timed as 0x4180b0"),
     FN(scLock, S::Done, "boolean, as in scream.exe"),
     FN(scLookAt, S::Done, ""),
     FN(scMenuSet, S::Done, ""),

@@ -180,6 +180,11 @@ void Sound::stopMenuMusic() {
 void Sound::playVoice(const std::string& file) { playChannel(sc::DIALOGUE, file, false); }
 bool Sound::voicePlaying() const { return channelPlaying(sc::DIALOGUE); }
 
+void Sound::duckMusic(float delta) {
+    if (audio_.playing(music_))
+        audio_.setGain(music_, std::clamp(audio_.gain(music_) + delta, 0.0f, 1.0f));
+}
+
 void Sound::playTrack(const Track& t) {
     if (music_ && audio_.playing(music_)) {
         if (musicName_ == t.name)

@@ -121,7 +121,9 @@ std::string Engine::serializeState() {
 
     // Engine.
     for (Item* it : inventory) o << "inv " << it->name << "\n";
-    for (const auto& [idx, text] : journal) o << "jrn " << idx << " " << escape(text) << "\n";
+    o << "jrnpos " << journal.first << " " << journal.last << "\n";
+    for (int idx : journal.added) o << "jrnadded " << idx << "\n";
+    for (const auto& line : journal.lines) o << "jrn " << escape(line) << "\n";
     for (int f : flags) o << "flag " << f << "\n";
     for (const auto& [key, v] : ambience) o << "amb " << key << " " << v.first << " " << v.second << "\n";
     o << "hint " << hintState << "\n";
@@ -156,7 +158,8 @@ bool Engine::restoreState(const std::string& data) {
     choice_ = nullptr;
     invOpen_ = journalOpen_ = false;
     held = nullptr;
-    feedback_.clear();
+    clearFeedback();
+    unloadSubtitles();
     locked = waitMode = false;
     timers_.clear();
     camAnim_.active = false;
@@ -169,7 +172,7 @@ bool Engine::restoreState(const std::string& data) {
         setLuaGlobal(name, &v);
 
     inventory.clear();
-    journal.clear();
+    journal = {};
     flags.clear();
     ambience.clear();
     zooms.clear();
@@ -232,10 +235,14 @@ bool Engine::restoreState(const std::string& data) {
             std::string name;
             ls >> name;
             if (auto it = world.items.find(name); it != world.items.end()) inventory.push_back(it->second.get());
-        } else if (tag == "jrn") {
+        } else if (tag == "jrnpos") {
+            ls >> journal.first >> journal.last;
+        } else if (tag == "jrnadded") {
             int idx;
             ls >> idx;
-            journal[idx] = rest(ls);
+            journal.added.insert(idx);
+        } else if (tag == "jrn") {
+            journal.lines.push_back(rest(ls));
         } else if (tag == "flag") {
             int f;
             ls >> f;

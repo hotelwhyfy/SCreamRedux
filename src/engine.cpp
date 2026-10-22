@@ -1,8 +1,10 @@
 #include "engine.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <fstream>
+#include <optional>
 #include <sstream>
 
 #include "constants.hpp"
@@ -16,10 +18,9 @@ constexpr float kEdgeZone = 0.15f;       // edge zones: 15% of the width / view 
 constexpr float kPanFactor = 0.005f;     // radians per pixel of zone depth, x CAM_SPEED/1000
 constexpr float kRampPerSecond = 1.5f;   // acceleration ramp: +0.025 per frame at 60 fps
 constexpr float kPitchLimit = 1.75f;     // pitch is the look vector's y; |y| <= 1.75 (~60.3 deg)
-constexpr float kBar = 64;               // UI bars above and below the 3D view (canvas units)
+constexpr float kPx = float(sc::SCREEN_W) / Engine::kOrigW;  // canvas units per original pixel (1024x768 mode)
+constexpr float kBar = 64 * kPx;         // UI bars above and below the 3D view: 64 pixels
 constexpr double kLookDuration = 0.6;    // seconds for scLookAt(..., SC_SMOOTH)
-constexpr float kTextScale = 0.75f;      // 32px font cells drawn at 24 canvas units
-constexpr float kTextMargin = 30;        // left/right margin of the text bar
 
 float faceYaw(int face) {
     switch (face) {
@@ -268,19 +269,148 @@ void Engine::lookAt(int face, bool smooth) {
     camAnim_ = {true, cam.yaw, cam.yaw + wrap180(yaw - cam.yaw), cam.pitch, pitch, now(), kLookDuration};
 }
 
+// The text setter (0x40e150), shared by scFeedback, dialogue and subtitles.
+// Text is split by length into 1-4 balanced lines (breaking at the first
+// space once a line has reached its share), '|' is a non-breaking space, and
+// the display time is 100/SC_TXT_SPEED + length/16 seconds.
 void Engine::feedback(const std::string& text, const std::string& voice) {
-    feedback_ = text;
-    // Reading time scales with SC_TXT_SPEED (default 50, about 20 characters a
-    // second); voiced lines also stay up for as long as the voice plays.
-    double speed = 50;
-    if (auto* s = std::get_if<double>(&settings[sc::TXT_SPEED]); s && *s > 0)
-        speed = *s;
-    feedbackUntil_ = now() + 1.5 + double(text.size()) / (0.4 * speed);
-    feedbackVoiced_ = !voice.empty();
     if (!voice.empty())
         sound.playVoice(voice);
-    if (!text.empty())
-        SDL_Log("[feedback] %s%s%s", text.c_str(), voice.empty() ? "" : "  ", voice.c_str());
+    if (text.size() >= 400)
+        return;  // the original ignores text that doesn't fit its buffer
+    if (text.empty()) {
+        feedback_.count = 0;  // the original shows an empty line for 4 s
+        return;
+    }
+    SDL_Log("[feedback] %s%s%s", text.c_str(), voice.empty() ? "" : "  ", voice.c_str());
+
+    int n = int(text.size()), last, share;
+    if (n > 300) last = 3, share = n / 4;
+    else if (n > 200) last = 2, share = n / 3;
+    else if (n > 100) last = 1, share = n / 2;
+    else last = 0, share = 100;
+
+    FeedbackText& f = feedback_;
+    f.lines = {};
+    std::string buf = text;
+    int slot = last, run = 0;
+    size_t from = 0;
+    for (size_t i = 0; i < buf.size(); ++i, ++run) {
+        if (buf[i] == ' ' && run >= share - 1) {
+            // The original writes below lines[0] when a text splits into more
+            // lines than planned; those extra lines are dropped here.
+            if (slot >= 0)
+                f.lines[size_t(slot)] = buf.substr(from, i - from);
+            --slot;
+            from = i + 1;
+            ++i;  // the character after the break is taken without a check
+            run = 0;
+        } else if (buf[i] == '|') {
+            buf[i] = ' ';
+        }
+    }
+    if (slot >= 0)
+        f.lines[size_t(slot)] = buf.substr(std::min(from, buf.size()));
+    // (Slots the split didn't reach keep stale text in the original; here they are empty.)
+
+    double speed = 50;
+    if (auto* v = std::get_if<double>(&settings[sc::TXT_SPEED]); v && *v > 0)
+        speed = *v;
+    f.count = last + 1;
+    f.start = now();
+    f.duration = int(100 / speed) + (n <= 16 ? 32 : n) / 16;
+    f.fresh = true;
+}
+
+// scLoadSubtitle opens an .srt file next to the game data (0x418080).
+void Engine::loadSubtitles(const std::string& file) {
+    // The original's state is static and never reset; a fresh start per file is
+    // equivalent for the game's single subtitle file.
+    subs_ = {};
+    std::ifstream in(findData(file), std::ios::binary);
+    if (!in) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "scLoadSubtitle: cannot open %s", file.c_str());
+        return;
+    }
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    for (char c : ss.str())
+        if (c != '\r')  // the original reads the file in text mode
+            subs_.data += c;
+    subs_.active = true;
+}
+
+// The subtitle player (0x4180b0), run every frame. Its clock is a counter of
+// whole seconds since loading. When the current cue's end time is reached
+// the text is cleared and the next cue is read; its text is shown on the
+// first tick at or after its start time. Reading stops at the end of the
+// file or at a cue numbered 13 (the empty last cue of sdc-intro.srt).
+void Engine::updateSubtitles() {
+    Subtitles& s = subs_;
+    if (!s.active)
+        return;
+    auto skipSpace = [&] { while (s.pos < s.data.size() && std::isspace((unsigned char)s.data[s.pos])) ++s.pos; };
+    auto token = [&] {
+        skipSpace();
+        size_t from = s.pos;
+        while (s.pos < s.data.size() && !std::isspace((unsigned char)s.data[s.pos])) ++s.pos;
+        return s.data.substr(from, s.pos - from);
+    };
+    auto line = [&] {  // fgets, without the newline; false at the end of the file
+        if (s.pos >= s.data.size()) return std::optional<std::string>();
+        size_t nl = s.data.find('\n', s.pos), to = nl == std::string::npos ? s.data.size() : nl;
+        std::string l = s.data.substr(s.pos, to - s.pos);
+        s.pos = nl == std::string::npos ? s.data.size() : nl + 1;
+        return std::optional<std::string>(l);
+    };
+    // HH:MM:SS,mmm in tenths of a second, times 0.1. The original's hour factor
+    // is 12000 (not 36000), and once the counter passes 100 an end time's
+    // factor stops stepping down; both are kept.
+    auto parseTime = [&](const std::string& tok, bool isEnd) {
+        float sum = 0;
+        int mult = 1000;
+        for (size_t p = 0; p < tok.size(); p += 3) {
+            if (tok[p] != ':' && tok[p] != ',') {
+                int v = std::atoi(tok.c_str() + p);
+                if (mult == 1) sum += float(v / 100);
+                else if (mult == 10) sum += float(v * 10);
+                else if (mult == 100) sum += float(v * 600);
+                else if (mult == 1000) sum += float(v * 12000);
+            }
+            if (!isEnd || s.counter <= 100)
+                mult /= 10;
+        }
+        return sum * 0.1f;
+    };
+
+    double t = now();
+    if (s.end <= s.counter) {
+        feedback("");
+        s.pending = true;
+        if (s.pos >= s.data.size())
+            return;  // end of file: the original keeps clearing the text every frame
+        if (std::atoi(token().c_str()) == 13) {
+            s.active = false;
+            return;
+        }
+        s.start = parseTime(token(), false);
+        token();  // "-->"
+        s.end = parseTime(token(), true);
+        line();  // rest of the timing line
+        s.text.clear();
+        while (auto l = line()) {
+            s.text += *l + " ";
+            if (l->empty())
+                break;
+        }
+    } else if (t - s.lastTick >= 1.0) {
+        s.lastTick = t;
+        if (s.start <= s.counter && s.pending) {
+            feedback(s.text);
+            s.pending = false;
+        }
+        s.counter += 1;
+    }
 }
 
 void Engine::perform(const Action& a) {
@@ -308,14 +438,13 @@ void Engine::addTimer(double seconds, const std::string& fn, bool global) {
     timers_.push_back({now() + seconds, fn, global});
 }
 
-// Zoom images are drawn full width at their own aspect, centered vertically.
-Engine::ZoomRect Engine::zoomRect(const View& z) {
-    const auto* t = renderer.texture(res, z.image);
-    float h = t ? sc::SCREEN_W * float(t->height) / float(t->width) : kZoomH;
-    return {0, (sc::SCREEN_H - h) / 2, float(sc::SCREEN_W), h};
+// Zoom images are stretched over the whole view between the bars, whatever
+// their size (800x472 originals, 1024x640 in the DC update).
+Engine::ZoomRect Engine::zoomRect(const View&) {
+    return {0, kBar, float(sc::SCREEN_W), sc::SCREEN_H - 2 * kBar};
 }
 
-// The 3D view: full window width, between the 64-unit UI bars (glViewport(0, 64, W, H-128)).
+// The 3D view: full window width, between the 64 pixel UI bars (glViewport(0, 64, W, H-128)).
 Viewport Engine::nodeViewport() const {
     int w, h;
     SDL_GetWindowSizeInPixels(window_, &w, &h);
@@ -348,9 +477,9 @@ Object* Engine::hovered(int& edge) {
 
     // Edge zones (0x40df60): 15% of the width at the sides; vertically 15% of
     // (H - 192), measured from the top bar and from H - 128, in the original's
-    // 800x600 coordinates (so the bottom zone is the deeper one, as in scream.exe).
+    // screen pixels (so the bottom zone is the deeper one, as in scream.exe).
     Canvas c = Canvas::fit(w, h);
-    const float zoneY = std::floor((sc::SCREEN_H - 192) * kEdgeZone);
+    const float zoneY = std::floor((kOrigH - 192) * kEdgeZone) * kPx;
     const float cy = c.toCanvasY(my);
     if (mx < w * kEdgeZone) edge = sc::LEFT;
     else if (mx > w * (1 - kEdgeZone)) edge = sc::RIGHT;
@@ -397,7 +526,7 @@ void Engine::showChoice(const std::string& name) {
         return;
     }
     choice_ = it->second.get();
-    feedback_.clear();
+    clearFeedback();
 }
 
 void Engine::canvasMouse(float& x, float& y) const {
@@ -416,38 +545,87 @@ void Engine::ensureFont() {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "cannot load font %s", want.c_str());
 }
 
-int Engine::choiceAt(float x, float y) {
+// Choices, as scream.exe lays them out (0x415850, 0x40b250, hit test 0x417c90),
+// in 1024x768 pixels: one row per option plus an empty bottom row, stacked up
+// from the bottom bar 16 pixels apart with option 0 on top, left-aligned at
+// x = 16. With three options the four rows drop 8 pixels (the bottom row off
+// screen) and the hit rows shift by one. Hit rows span the full width and sit
+// 8 pixels above the text. Returns the hit row's number (0 = none).
+int Engine::choiceHit(float y) const {
+    const int n = int(choice_->options.size());
+    const float py = y * float(kOrigH) / sc::SCREEN_H;
+    for (int k = 0; k <= n; ++k) {
+        int lo = kOrigH - 16 * (n - k) - 32, hi = lo + 16;
+        if (py >= float(lo) && py <= float(hi))
+            return n == 3 ? k : k + 1;
+    }
+    return 0;
+}
+
+int Engine::choiceAt(float, float y) {
     if (!choice_)
         return -1;
-    float lh = font_.lineHeight(kTextScale);
-    float top = sc::SCREEN_H - 12 - lh * float(choice_->options.size());
-    if (x < kTextMargin || x > sc::SCREEN_W - kTextMargin || y < top)
-        return -1;
-    int i = int((y - top) / lh);
-    return i < int(choice_->options.size()) ? i : -1;
+    int v = choiceHit(y);
+    return v >= 1 && v <= int(choice_->options.size()) ? v - 1 : -1;
 }
 
 void Engine::drawChoice() {
-    float lh = font_.lineHeight(kTextScale);
-    float top = sc::SCREEN_H - 12 - lh * float(choice_->options.size());
-    renderer.drawRect(0, top - 8, sc::SCREEN_W, sc::SCREEN_H - top + 8, 0, 0, 0, 0.6f);
+    const int n = int(choice_->options.size()), rows = n + 1, offset = rows == 4 ? -8 : 8;
+    const float px = kPx;
     float mx, my;
     canvasMouse(mx, my);
-    int hover = choiceAt(mx, my);
-    for (size_t i = 0; i < choice_->options.size(); ++i)
-        font_.draw(renderer, choice_->options[i].first, kTextMargin, top + lh * float(i), kTextScale,
-                   int(i) == hover ? 1.0f : 0.6f);
+    int v = choiceHit(my), hover = v ? n - v + 1 : -1;
+    for (int j = 1; j < rows; ++j) {  // row 0 is the empty one
+        const std::string& text = choice_->options[size_t(n - j)].first;
+        float y = float(kOrigH - offset - 16 * j) * px;
+        font_.drawMono(renderer, text, 16 * px, y, px, 1, {0.1f, 0.75f, 0.75f});
+        if (j == hover)
+            font_.drawMono(renderer, text, 16 * px, y, px, 1, {0.1f, 1, 1});
+    }
 }
 
+// The feedback renderer (0x40aca0), in the original's 1024x768 screen pixels.
+// Lines stack upward from the bottom bar, 16 pixels apart, centred assuming
+// the 10 pixel advance; four-line texts show three lines at a time, the
+// first three for half the display time. The fade runs once per line drawn:
+// in at SC_TXT_SPEED/1000 and out at SC_TXT_SPEED/10000 per 60 Hz frame.
 void Engine::drawFeedback() {
-    auto lines = font_.wrap(feedback_, sc::SCREEN_W - 2 * kTextMargin, kTextScale);
-    float lh = font_.lineHeight(kTextScale);
-    float top = sc::SCREEN_H - 12 - lh * float(lines.size());
-    renderer.drawRect(0, top - 8, sc::SCREEN_W, sc::SCREEN_H - top + 8, 0, 0, 0, 0.5f);
-    for (size_t i = 0; i < lines.size(); ++i) {
-        float w = font_.width(lines[i], kTextScale);
-        font_.draw(renderer, lines[i], (sc::SCREEN_W - w) / 2, top + lh * float(i), kTextScale);
+    FeedbackText& f = feedback_;
+    if (f.count == 0)
+        return;
+    double speed = 50;
+    if (auto* v = std::get_if<double>(&settings[sc::TXT_SPEED]); v && *v > 0)
+        speed = *v;
+    const float frames = float(frameDt_ * 60), fadeIn = float(speed * 0.001), fadeOut = float(speed * 0.0001);
+    if (f.fresh) {
+        f.fresh = false;
+        f.fade = 1;
     }
+    double t = now() - f.start;
+    int first = 0, end = f.count, offset;
+    switch (f.count) {
+    case 2: offset = 16; break;
+    case 3: offset = 8; break;
+    case 4:
+        if (t >= f.duration * 0.5) end = 3, offset = 8;
+        else first = 1, offset = -8;
+        break;
+    default: offset = 24;
+    }
+    const float px = kPx;
+    for (int i = first; i < end; ++i) {
+        if (t <= f.duration) {
+            if (f.fade > 0) f.fade -= fadeIn * frames;
+        } else {
+            f.fade += fadeOut * frames;
+        }
+        const std::string& line = f.lines[size_t(i)];
+        int x = kOrigW / 2 - int(line.size() / 2) * Font::kMonoAdvance + 1;
+        int y = kOrigH - offset - 16 * i;
+        font_.drawMono(renderer, line, float(x) * px, float(y) * px, px, std::clamp(1 - f.fade, 0.0f, 1.0f));
+    }
+    if (f.fade >= 1)
+        f.count = 0;
 }
 
 void Engine::click() {
@@ -575,13 +753,14 @@ void Engine::panCamera(double dt) {
 
     double camSpeed = 50;
     if (auto* v = std::get_if<double>(&settings[sc::CAM_SPEED])) camSpeed = *v;
-    const float rate = kPanFactor * float(camSpeed) * 0.001f * panRamp_ * 60.0f * float(dt);
-    const float zoneY = std::floor((sc::SCREEN_H - 192) * kEdgeZone);
+    // Zone depth is in the original's screen pixels (1024x768 mode).
+    const float rate = kPanFactor * float(camSpeed) * 0.001f * panRamp_ * 60.0f * float(dt) / kPx;
+    const float zoneY = std::floor((kOrigH - 192) * kEdgeZone) * kPx;
 
     float yaw = cam.yaw * 3.14159265f / 180.0f;
     float pitchY = std::tan(cam.pitch * 3.14159265f / 180.0f);
     bool moved = false;
-    // Depth is measured in the original's 800-wide pixels so speed doesn't depend on window size.
+    // Depth is measured in canvas units so speed doesn't depend on window size.
     if (edge == sc::LEFT) { yaw -= (w * kEdgeZone - mx) / c.scale * rate; moved = true; }
     if (edge == sc::RIGHT) { yaw += (mx - w * (1 - kEdgeZone)) / c.scale * rate; moved = true; }
     if (edge == sc::UP && pitchY <= kPitchLimit) { pitchY += (kBar + zoneY - cy) * rate; moved = true; }
@@ -593,6 +772,7 @@ void Engine::panCamera(double dt) {
 }
 
 void Engine::update(double dt) {
+    frameDt_ = dt;
     if (menuOpen()) {
         sound.update(dt);  // menu music only; the game is paused
         return;
@@ -632,10 +812,7 @@ void Engine::update(double dt) {
     }
     sound.update(dt);
     script.update();
-    if (feedbackVoiced_ && sound.voicePlaying())
-        feedbackUntil_ = std::max(feedbackUntil_, t + 0.5);
-    if (!feedback_.empty() && t > feedbackUntil_)
-        feedback_.clear();
+    updateSubtitles();
 }
 
 // Cursor rules from scream.exe's main loop: hidden while locked unless wait
@@ -681,7 +858,7 @@ void Engine::render() {
         if (videoTex_.id)
             renderer.drawImage(videoTex_, 0, (sc::SCREEN_H - vh) / 2, sc::SCREEN_W, vh);
         ensureFont();
-        if (font_.loaded() && !feedback_.empty())
+        if (font_.loaded())
             drawFeedback();
         return;
     }
@@ -725,7 +902,7 @@ void Engine::render() {
         drawInventory();
     if (font_.loaded()) {
         if (choice_) drawChoice();
-        else if (!feedback_.empty()) drawFeedback();
+        else drawFeedback();
     }
 
     int edge;

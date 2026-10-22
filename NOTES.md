@@ -150,8 +150,9 @@ Verified against the shipped scripts and data while building the engine (`src/`)
 - Audio: Ogg Vorbis, 44.1 kHz (a few 48 kHz), mono/stereo; decoded with stb_vorbis into one
   SDL3 audio stream per voice. Videos (`vid-*`, `intro-*`, `outro-*`) are silent Theora 4:2:0 at
   24 fps (640×352, 800×472 or 1024×640); their sound is separate `scFXPlay` calls.
-- Fonts: 512×512 RGBA atlases, 16×16 grid of 32 px cells in Windows-1252 order, no width table
-  (widths are measured from alpha).
+- Fonts: 512×512 RGBA atlases, 16×16 grid of 32 px cells in Windows-1252 order, no width table.
+  The game draws all its text monospace (see "Text" below); our proportional variant
+  (widths measured from alpha) is only for this port's own menu.
 - `scream --verify-media` decodes every asset: DC base 3357/3357, DC+update 3405/3405 OK.
 - Of 2914 files the DC script references, 5 are missing from the archives; only `black.jpg`
   (zoom `kitchen-cellar`) is reachable, and renders black, which is presumably the intent.
@@ -211,8 +212,22 @@ ECX), so Ghidra's decompiler hides arguments; read the disassembly alongside. Sc
   in rows of 10, in a 1024-wide virtual space.
 - Hints: with `scHints(SC_HINTS_ACTIVE)` and SC_HINTS on, opening shows `HINTS_OPEN`, grabbing
   the `HINTS_ITEM` item shows `HINTS_GRAB`, closing with it held shows `HINTS_CLOSE`.
-- `scJournalSet(image, font, open, turn, close)` attaches the journal to the bound item; the
-  book shows `scJournalAdd` entries in index order.
+- `scJournalSet(image, font, open, turn, close)` attaches the journal to the bound item.
+- Journal (`0x418550`, `0x40e380`, draw `0x40b0a0`, input `0x413f80`): `scJournalAdd(index,
+  text)` appends the entry once per index (flags at `0x4df7bb8`, saved with the game;
+  `scJournalClear` `0x418490` resets only the lines). Entries after the first get a blank line
+  before them; a line breaks at the first space once it is over 30 characters; `|` is a
+  non-breaking space; at most ~1000 lines. Quirk: the last line is stored only if the entry
+  wrapped or it isn't the first entry. The book (800×472 `journal.jpg`) covers the view like a
+  zoom; 76 lines per spread in two columns of 38, black, x = 32 / 512, y = 100 + 16·row
+  (1024×768 pixels). Clicks with y < 605 turn back (x < 512) or forward (x > 512) by 76 lines
+  (`0x40e490` clamps; the turn sound plays only when the page changed); lower clicks close.
+  The book opens at the page last shown.
+- Inventory grid (hit test `0x417c90`, state 0xfa3): slot (row, col) at x = 32 + col·(32 +
+  size), y = 64 + 96·row, size×size, 10 per row (1024×768 pixels). The inventory draw itself
+  shows no text; our hover label is an addition.
+- `FUN_00408550` is the original menu renderer (modes 0–4; the load/save lists draw 11 rows
+  at x = W/2 − 120, y = H − 276 + 16·i). Not ported yet: our menu layout is our own.
 - Menu strings in the exe: "Which game do you want to play?", "Scratches: Director's Cut",
   "Scratches: The Last Visit", "Start a new game?", "Load a saved game?", "Replace saved
   game?", "Quit the game?", "Game loaded/saved", "Could not load/save game!"; setup items
@@ -220,6 +235,48 @@ ECX), so Ghidra's decompiler hides arguments; read the disassembly alongside. Sc
   quality (LOW/MEDIUM/HIGH), slideshow mode, alternate control. Menu layout is not recovered.
 - Saves are this port's own format (`src/save.cpp`): script globals as a diff against the
   start-of-game baseline, plus world/engine state. A new game restores that baseline.
+
+### Text: feedback, subtitles, dialogue, choices (from `scream.exe`)
+
+- Screen layout is in pixels of the configured mode; the DC's `scream.cfg` default is
+  1024×768 (bars 64 px, view 1024×640 = the HD zoom size). This port maps that mode onto its
+  800×600 canvas (0.78125 per pixel): bars 50 units, zooms/overlays/book stretched over the
+  view, edge-zone depth in 1024-mode pixels.
+- Text draw `0x40c040`: one GL display list per character (`0x40bf20`): a 16×16 px quad of the
+  whole 32 px atlas cell, then a 10 px advance (monospace). Callers pass x and the cell's
+  bottom y (top-down).
+- Text setter `0x40e150` (used by scFeedback, dialogue, subtitles, prompts): ignores text of
+  400+ chars; length n ≤ 100 → 1 line, ≤ 200 → 2 (share n/2), ≤ 300 → 3, else 4 (n/4); a line
+  breaks at the first space once it has share−1 chars; `|` → non-breaking space. Duration
+  `100/SC_TXT_SPEED + max(n, 32 if n ≤ 16)/16` s. Quirks: unreached line slots keep stale text,
+  overflow lines write below the slot array (both not reproduced).
+- Feedback renderer `0x40aca0`: lines stacked up from y = H − offset (offset 24/16/8 for 1/2/3
+  lines), 16 px apart, x = W/2 − (len/2)·10 + 1; 4-line text shows lines 2–4 at offset −8 for
+  the first half of the duration, then 1–3 at offset 8. Fade per line drawn per frame
+  (×60/fps): in at speed·0.001, out at speed·0.0001 after the duration; cleared at full fade.
+  A glow pass (flag `0x4df8de0`) is dead code: nothing sets it.
+- SC_TXT_SPEED / SC_CAM_SPEED (`0x4df8d0c` / `…d08`, set in `0x40fde0`): SC_LO/MED/HI → 25/50/75,
+  other values as given. Hotkey handler `0x4175b0` also changes them (not ported yet).
+- Subtitles (`scLoadSubtitle` `0x418080`, player `0x4180b0` called from the per-frame update
+  `0x412010`, so also during cutscenes): a counter of whole seconds since loading
+  (`0x48bc58`, +1 when ≥ 1000 ms passed). When counter ≥ cue end: text cleared, next cue read
+  (`fscanf %d`, stop at EOF or index 13 — the empty last cue of `sdc-intro.srt`; times
+  HH:MM:SS,mmm → tenths with an hour factor of 12000, and an end time's field factor stops
+  stepping down once the counter passes 100); its text lines joined with spaces are shown on
+  the first tick with counter ≥ start.
+- Dialogue (`scScriptGo` `0x4156a0`): music slots 0–7 turned down 0.25 for the whole script;
+  per line, unless it was added with flag 1 and SC_HINTS (`0x4df8d38`) is off: voice on channel
+  13 + text via `0x40e150`; next line when the voice ends; text cleared at the end. The one
+  flagged line in the DC (`dlg-01218`) is a hint ("...stop by the gates...").
+- Choices (`scChoiceGo` `0x415850`, draw `0x40b250` with EAX=0, hit test `0x417c90` state
+  0xfa7): rows = options + 1 (an empty bottom row), option 0 on top; y = H − offset − 16·row
+  (offset 8, or −8 with 4 rows), x = 16, colour (0.1, 0.75, 0.75), hovered row redrawn
+  (0.1, 1, 1). Hit rows span the full width, 8 px above the text; with 3 options the hit
+  numbering shifts by one. 16 options max (`0x403e30`). The centred variant (EAX=1, top row
+  white) is the menu's prompt list (`0x412fa0`).
+- View transitions: `scSwitch` (`0x4158d0`) and other state changes capture the screen
+  (`0x407ad0`, flag `0x48badc`); each state's renderer then fades that capture out at
+  `0x4df8d10`·0.001 per frame (default 25). Not ported yet.
 
 ### Effects (from `scream.exe`, implemented in `src/effects.cpp`)
 
@@ -251,8 +308,7 @@ saves). Ghidra on `scream.exe` covers semantics the scripts don't reveal.
 ## Open questions
 
 - Original save game format (only matters if we want to load original saves).
-- The third arg of `scScriptAdd`, and exactly when the two zoom sounds play (`0x416120`,
-  `0x4160d0`).
+- Exactly when the two zoom sounds play (`0x416120`, `0x4160d0`).
 - `scOverlay`: which of the three strings is the image, and what the others do.
 - Playlist per-track repeat count and fade-time fields.
 - Whether `scTimerCreate` timers are cancelled on leaving the node (currently assumed).

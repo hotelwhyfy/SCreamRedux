@@ -37,6 +37,8 @@ public:
 
     void playVoice(const std::string& file);
     bool voicePlaying() const;
+    // Shift the music's gain (scScriptGo turns it down by 0.25 during dialogue).
+    void duckMusic(float delta);
 
     void playTrack(const Track& t);
     void stopTrack(const std::string& name = {});

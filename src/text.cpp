@@ -75,3 +75,16 @@ void Font::draw(Renderer& r, const std::string& s, float x, float y, float scale
         x += float(g.width + kTracking) * scale;
     }
 }
+
+void Font::drawMono(Renderer& r, const std::string& s, float x, float baseline, float px, float alpha,
+                    TextColor color) const {
+    const float inv = 1.0f / kGrid, size = kMonoCell * px;
+    for (unsigned char c : s) {
+        if (glyphs_[c].width > 0) {
+            float u0 = float(c % kGrid) * inv, v0 = float(c / kGrid) * inv;
+            r.drawImageUV(texture_, x, baseline - size, size, size, u0, v0, u0 + inv, v0 + inv, alpha, color.r,
+                          color.g, color.b);
+        }
+        x += kMonoAdvance * px;
+    }
+}

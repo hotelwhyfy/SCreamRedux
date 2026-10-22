@@ -2,8 +2,12 @@
 
 // Bitmap fonts: 512x512 RGBA atlases with a 16x16 grid of 32px cells in
 // Windows-1252 order (font-michael.tga, font-peter.tga, font-menu.tga, ...).
-// There is no width table, so glyph widths are measured from the alpha
-// channel when the font is loaded.
+//
+// scream.exe draws all game text (feedback, subtitles, choices, journal) as
+// monospace: one display list per character (0x40bf20) holding a 16x16 pixel
+// quad of the whole cell followed by a 10 pixel advance. drawMono() does the
+// same. The proportional draw()/width()/wrap() measure glyph widths from the
+// alpha channel and serve our own screens (menu).
 
 #include <array>
 #include <string>
@@ -30,6 +34,12 @@ public:
     std::vector<std::string> wrap(const std::string& s, float maxWidth, float scale) const;
     void draw(Renderer& r, const std::string& s, float x, float y, float scale, float alpha = 1,
               TextColor color = {}) const;
+
+    // Original metrics, in screen pixels scaled by `px` canvas units per pixel.
+    // `baseline` is the bottom of the 16 pixel cell, as passed to 0x40c040.
+    static constexpr int kMonoCell = 16, kMonoAdvance = 10;
+    void drawMono(Renderer& r, const std::string& s, float x, float baseline, float px, float alpha = 1,
+                  TextColor color = {}) const;
 
 private:
     static constexpr int kCell = 32, kGrid = 16;

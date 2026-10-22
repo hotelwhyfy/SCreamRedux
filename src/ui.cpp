@@ -15,12 +15,11 @@
 
 namespace {
 
-constexpr float kVirtual = 800.0f / 1024.0f;  // scream.exe lays the grid out in 1024-wide units
+constexpr float kVirtual = 800.0f / 1024.0f;  // canvas units per original pixel (1024x768 mode)
 constexpr int kColumns = 10;
 constexpr int kSlots = 70;
 constexpr float kLabelScale = 0.75f;
-constexpr float kJournalScale = 0.55f;
-constexpr TextColor kInk{0.16f, 0.11f, 0.07f};  // journal text is drawn dark on the page
+constexpr int kJournalPage = 76;  // lines per two-page spread
 
 const Reaction* findReaction(const std::vector<Reaction>& reactions, const Item* item) {
     for (const auto& r : reactions)
@@ -31,11 +30,12 @@ const Reaction* findReaction(const std::vector<Reaction>& reactions, const Item*
 
 }  // namespace
 
-bool Engine::hintsActive() const {
+bool Engine::hintsOn() const {
     auto it = settings.find(sc::HINTS);
-    bool enabled = it != settings.end() && std::holds_alternative<double>(it->second) && std::get<double>(it->second) == 1;
-    return enabled && hintState == sc::HINTS_ACTIVE;
+    return it != settings.end() && std::holds_alternative<double>(it->second) && std::get<double>(it->second) == 1;
 }
+
+bool Engine::hintsActive() const { return hintsOn() && hintState == sc::HINTS_ACTIVE; }
 
 bool Engine::canOpenInventory() const {
     return !locked && !scriptBusy() && !video_ && !choice_ && !journalOpen_ && view();
@@ -73,7 +73,7 @@ Engine::Box Engine::slotBox(int slot) const {
     if (it != settings.end() && std::holds_alternative<double>(it->second)) size = std::get<double>(it->second);
     int col = slot % kColumns, row = slot / kColumns;
     float x = float(32 + col * (32 + size)) * kVirtual;
-    float y = 64 + 40 + float(row * 96) * kVirtual;
+    float y = float(64 + row * 96) * kVirtual;  // hit test 0x417c90 (state 0xfa3)
     return {x, y, float(size) * kVirtual, float(size) * kVirtual};
 }
 
@@ -144,7 +144,7 @@ void Engine::drawInventory() {
         }
     }
     // Label of the item under the cursor, in the bottom bar.
-    if (hover >= 0 && feedback_.empty() && font_.loaded()) {
+    if (hover >= 0 && !feedbackShown() && font_.loaded()) {
         const std::string& label = inventory[size_t(hover)]->label;
         float w = font_.width(label, kLabelScale);
         font_.draw(renderer, label, (sc::SCREEN_W - w) / 2, sc::SCREEN_H - 52, kLabelScale);
@@ -167,10 +167,8 @@ void Engine::openJournal() {
         return;
     if (!journalFont_.loaded() && !journalFont_.load(renderer, res, journalConfig.font))
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "cannot load journal font %s", journalConfig.font.c_str());
-    layoutJournal();
-    // Open at the spread holding the newest entry.
-    journalSpread_ = journalPages_.empty() ? 0 : (journalPages_.size() - 1) / 2;
-    journalOpen_ = true;
+    clearFeedback();
+    journalOpen_ = true;  // at the page last shown (0x418580)
     invOpen_ = false;
     sound.playFx(journalConfig.openSound);
 }
@@ -180,61 +178,92 @@ void Engine::closeJournal() {
     sound.playFx(journalConfig.closeSound);
 }
 
-// Entries in index order, wrapped to the page width and flowed across pages.
-void Engine::layoutJournal() {
-    journalPages_.clear();
-    if (!journalFont_.loaded())
+// scJournalAdd (0x418550, 0x40e380): entries after the first are preceded by
+// an empty line; a line breaks at the first space once it is over 30
+// characters, and '|' is a non-breaking space. As in the original, the last
+// line is only stored when the entry starts a new line (so a one-line first
+// entry is lost).
+void Engine::journalAdd(int index, const std::string& text) {
+    Journal& j = journal;
+    if (!j.added.insert(index).second)
         return;
-    const float pageWidth = 280, lineHeight = journalFont_.lineHeight(kJournalScale);
-    const size_t linesPerPage = size_t(380 / lineHeight);
-    std::vector<std::string> page;
-    auto push = [&](const std::string& line) {
-        if (page.size() >= linesPerPage) {
-            journalPages_.push_back(std::move(page));
-            page.clear();
-        }
-        if (!(page.empty() && line.empty()))
-            page.push_back(line);
+    auto line = [&](int i) -> std::string& {
+        if (j.lines.size() <= size_t(i)) j.lines.resize(size_t(i) + 1);
+        return j.lines[size_t(i)];
     };
-    for (const auto& [index, text] : journal) {
-        for (const auto& line : journalFont_.wrap(text, pageWidth, kJournalScale))
-            push(line);
-        push("");
+    int n = 0;
+    if (j.last >= 1) {
+        line(j.last).clear();
+        n = j.last + 1;
+        if (n > 1000)
+            return;
     }
-    if (!page.empty())
-        journalPages_.push_back(std::move(page));
+    std::string buf = text;
+    size_t from = 0;
+    int run = 0;
+    for (size_t i = 0; i < buf.size(); ++i, ++run) {
+        if (buf[i] == ' ' && run > 30) {
+            line(n++) = buf.substr(from, i - from);
+            from = i + 1;
+            ++i;  // the character after the break is taken without a check
+            run = 0;
+        } else if (buf[i] == '|') {
+            buf[i] = ' ';
+        }
+    }
+    if (j.last < n)
+        line(n) = buf.substr(std::min(from, buf.size()));
+    j.last = n + 1;
 }
 
+// Clicks above y = 605 (1024x768 pixels) turn back on the left half and
+// forward on the right half; the turn sound plays when the page changes.
+// Clicks below close the book (0x413f80).
 void Engine::journalClick() {
     float x, y;
     canvasMouse(x, y);
-    size_t spreads = (journalPages_.size() + 1) / 2;
-    // Left half turns back, right half turns forward.
-    if (x < sc::SCREEN_W / 2.0f && journalSpread_ > 0) {
-        --journalSpread_;
-        sound.playFx(journalConfig.turnSound);
-    } else if (x >= sc::SCREEN_W / 2.0f && journalSpread_ + 1 < spreads) {
-        ++journalSpread_;
-        sound.playFx(journalConfig.turnSound);
+    const float px = kVirtual, ox = x / px, oy = y / px;
+    if (oy >= 605) {
+        closeJournal();
+        return;
     }
+    auto turn = [&](int by) {  // 0x40e490
+        Journal& j = journal;
+        j.first += by;
+        if (j.first < 0) {
+            j.first = 0;
+            return false;
+        }
+        if (j.first <= j.last)
+            return true;
+        j.first = j.last / kJournalPage * kJournalPage;
+        return false;
+    };
+    if (ox < 512 && turn(-kJournalPage))
+        sound.playFx(journalConfig.turnSound);
+    if (ox > 512 && turn(kJournalPage))
+        sound.playFx(journalConfig.turnSound);
 }
 
+// The book image, then 76 lines in two columns of 38 (0x40b0a0): black text
+// at x = 32 and 512, from y = 100 in 16 pixel steps.
 void Engine::drawJournal() {
     const auto* book = renderer.texture(res, journalConfig.image);
     if (!book)
         return;
-    float h = sc::SCREEN_W * float(book->height) / float(book->width);
-    float top = (sc::SCREEN_H - h) / 2;
-    renderer.drawImage(*book, 0, top, sc::SCREEN_W, h);
+    // Like a zoom image, over the view between the 64 pixel bars (0x4083c0).
+    renderer.drawImage(*book, 0, 64 * kVirtual, sc::SCREEN_W, sc::SCREEN_H - 128 * kVirtual);
     if (!journalFont_.loaded())
         return;
-    const float lh = journalFont_.lineHeight(kJournalScale);
-    const float pageX[2] = {40, 410};
-    for (int side = 0; side < 2; ++side) {
-        size_t p = journalSpread_ * 2 + size_t(side);
-        if (p >= journalPages_.size())
-            break;
-        for (size_t i = 0; i < journalPages_[p].size(); ++i)
-            journalFont_.draw(renderer, journalPages_[p][i], pageX[side], top + 40 + lh * float(i), kJournalScale, 1, kInk);
+    const float px = kVirtual;
+    int x = 32, y = 100;
+    for (int r = 0, i = journal.first; r < kJournalPage; ++r, ++i) {
+        if (i <= journal.last && size_t(i) < journal.lines.size())
+            journalFont_.drawMono(renderer, journal.lines[size_t(i)], float(x) * px, float(y) * px, px, 1, {0, 0, 0});
+        y += 16;
+        if (y > 703) {
+            y = 100;
+            x += 480;
+        }
     }
 }

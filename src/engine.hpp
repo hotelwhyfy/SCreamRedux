@@ -2,6 +2,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <array>
 #include <filesystem>
 #include <functional>
 #include <map>
@@ -66,7 +67,16 @@ public:
     int hintState = 0;                 // scHints
     std::vector<Item*> inventory;
     Item* held = nullptr;              // item picked up from the inventory (used as the cursor)
-    std::map<int, std::string> journal;  // scJournalAdd: entry index -> text
+    // The journal's text, as scream.exe keeps it: entries are wrapped into lines
+    // when added (0x40e380), once per index; `first` is the top line shown and
+    // `last` one past the last entry (0x4df8b58, 0x4df8b5c).
+    struct Journal {
+        std::vector<std::string> lines;
+        std::set<int> added;  // 0x4df7bb8; scJournalClear leaves it alone
+        int first = 0, last = 0;
+    } journal;
+    void journalAdd(int index, const std::string& text);
+    void journalClear() { journal.lines.clear(), journal.first = journal.last = 0; }
 
     // scJournalSet, called while the journal item is bound: the book opens from that item.
     struct JournalConfig {
@@ -75,7 +85,6 @@ public:
     } journalConfig;
     void openJournal();  // also scJournalShow
     void closeJournal();
-    std::string subtitles;
     std::map<int, std::pair<int, int>> ambience;  // scSetAmbience: key -> (preset, flag)
 
     bool flag(int f) const;  // scEnable/scDisable state
@@ -110,6 +119,13 @@ public:
     bool cameraMoving() const { return camAnim_.active; }
 
     void feedback(const std::string& text, const std::string& voice = {});
+    // scream.exe's default screen mode; its text layout is in these pixels.
+    static constexpr int kOrigW = 1024, kOrigH = 768;
+    bool feedbackShown() const { return feedback_.count > 0; }
+    bool hintsOn() const;  // SC_HINTS (0x4df8d38)
+    void clearFeedback() { feedback_.count = 0; }
+    void loadSubtitles(const std::string& file);
+    void unloadSubtitles() { subs_ = {}; }
     void showChoice(const std::string& name);  // scChoiceGo
 
     // scCutscene: returns false if the video can't be played (the caller then doesn't wait).
@@ -203,8 +219,6 @@ private:
     // Inventory and journal screens (ui.cpp).
     bool invOpen_ = false;
     bool journalOpen_ = false;
-    size_t journalSpread_ = 0;
-    std::vector<std::vector<std::string>> journalPages_;  // wrapped lines per page
     Font journalFont_;
     struct Box { float x, y, w, h; };
     bool canOpenInventory() const;
@@ -216,7 +230,6 @@ private:
     void inventoryClick();
     void useHeldOn(Object* o);
     void drawInventory();
-    void layoutJournal();
     void journalClick();
     void drawJournal();
     void drawHeldCursor();
@@ -273,9 +286,31 @@ private:
     };
     std::vector<Timer> timers_;
 
-    std::string feedback_;
-    double feedbackUntil_ = 0;
-    bool feedbackVoiced_ = false;
+    // Feedback text, as scream.exe's text setter (0x40e150) and renderer
+    // (0x40aca0) keep it: up to four lines (lines[0] is the bottom one), shown
+    // for `duration` seconds after `start`, fading in and then out.
+    struct FeedbackText {
+        std::array<std::string, 4> lines;
+        int count = 0;  // 0: nothing shown
+        double start = 0;
+        int duration = 0;
+        bool fresh = false;  // set by the setter; the renderer restarts the fade
+        float fade = 1;      // 1 = transparent
+    } feedback_;
+    double frameDt_ = 0;  // last frame's length, for the per-frame fades
+
+    // scLoadSubtitle: .srt cues shown through the feedback text (0x4180b0).
+    struct Subtitles {
+        bool active = false;
+        std::string data;  // the file, read as the original reads it (fscanf/fgets)
+        size_t pos = 0;
+        float counter = 0;          // whole seconds since loading (0x48bc58)
+        double lastTick = -1e9;     // time of the last counter tick (0x48bc64)
+        float start = 0, end = 0;   // current cue (0x48bc5c, 0x48bc60)
+        bool pending = false;       // cue text waiting for its start time (0x48bc54)
+        std::string text;           // 0x4df5c18
+    } subs_;
+    void updateSubtitles();
 
     Font font_;
     void ensureFont();
@@ -288,6 +323,7 @@ private:
     Renderer::Texture videoTex_;
 
     Choice* choice_ = nullptr;
-    int choiceAt(float x, float y);
+    int choiceAt(float x, float y);  // option index under the pointer, or -1
+    int choiceHit(float y) const;
     void drawChoice();
 };
