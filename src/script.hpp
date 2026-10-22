@@ -50,6 +50,10 @@ public:
     bool busyExcept(const std::string& name) const;
     bool isMain(lua_State* L) const { return L == L_; }
 
+    // Automated runs: abort a handler that runs this many million Lua
+    // instructions without yielding (0 = never, as in scream.exe).
+    void setWatchdog(int millions) { watchdog_ = millions; }
+
 private:
     struct Thread {
         lua_State* co;
@@ -63,4 +67,5 @@ private:
     lua_State* L_;
     std::vector<Thread> threads_;
     Ready pending_;
+    int watchdog_ = 0;
 };

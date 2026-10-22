@@ -5,6 +5,7 @@
 // enabled flags) and the engine moves the player around inside it.
 
 #include <array>
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -130,6 +131,13 @@ public:
     bool bind(int kind, const std::string& name);
     void begin(int kind);
     void end(int kind);
+
+    // Where scBind(SC_OBJECT) looks (0x403fd0): in the bound node while the
+    // engine is in node state, in the bound zoom in zoom state, nowhere in any
+    // other state (inventory, journal, ...). Unset while the world is built:
+    // then the last bound node or zoom.
+    enum class Scope { Build, Node, Zoom, None };
+    std::function<Scope()> objectScope;
 
     // Bind exactly what a click on `object` inside `view` of `room` refers to.
     void bindClicked(Room* room, View* view, Object* object);

@@ -158,6 +158,22 @@ Verified against the shipped scripts and data while building the engine (`src/`)
   error is written to the log as "Runtime error" (only with logging on) and the game carries
   on — the handler just stops. This port does the same.
 
+### Binding (`scBind` `0x4148a0` = find `0x403fd0` + bind `0x402ce0`)
+
+- `scSwitch` (`0x4158d0`) binds its target the same way before switching (except ZOOMOUT /
+  ZOOMBACK): SC_ROOM binds the room and then its entry node, SC_NODE the node, SC_ZOOM the
+  zoom, SC_OVERLAY the overlay. Zooming out to a parent zoom re-enters the switch as SC_ZOOM,
+  so the parent zoom is bound; zooming out to the node rebinds nothing. Scripts rely on this
+  (`scSwitch(SC_ZOOM, x)` then `scBind(SC_OBJECT, …)` / `scTextureUpdate(SC_ZOOM, …)`).
+- `scBind(SC_OBJECT, name)` searches the bound node in node state (4000), the bound zoom in
+  zoom state (0xfa2), and finds nothing in any other state (inventory, journal, ...).
+
+### Crawl (`scream --crawl`)
+
+- 2638 tasks (every object click, scReaction, scInventoryReaction, choice option and dialogue,
+  each from the start state, zooms reached through their parents) run clean apart from the two
+  script bugs above. This found the binding rules above.
+
 ### Media
 
 - Audio: Ogg Vorbis, 44.1 kHz (a few 48 kHz), mono/stereo; decoded with stb_vorbis into one

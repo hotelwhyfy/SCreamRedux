@@ -102,11 +102,14 @@ bool World::bind(int kind, const std::string& name) {
         bound.objects.clear();
         return true;
     }
-    case sc::OBJECT:
-        if (!bound.view)
+    case sc::OBJECT: {
+        Scope scope = objectScope ? objectScope() : Scope::Build;
+        View* v = scope == Scope::Node ? bound.node : scope == Scope::Zoom ? bound.zoom : scope == Scope::Build ? bound.view : nullptr;
+        if (!v)
             return false;
-        bound.objects = bound.view->find(name);
+        bound.objects = v->find(name);
         return !bound.objects.empty();
+    }
     case sc::ITEM:
         if (auto it = items.find(name); it != items.end()) { bound.item = it->second.get(); return true; }
         return false;

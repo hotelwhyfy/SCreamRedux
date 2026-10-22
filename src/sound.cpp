@@ -19,6 +19,11 @@ float volume10(double v) { return float(std::clamp(v, 0.0, 10.0) / 10.0); }
 Audio::Handle Sound::start(const std::string& file, bool loop, float gain) {
     if (file.empty() || !audio_.ok())
         return 0;
+    if (silent_) {
+        if (!res_.exists(file))
+            SDL_LogWarn(SDL_LOG_CATEGORY_AUDIO, "missing sound %s", file.c_str());
+        return 0;
+    }
     auto data = res_.read(file);
     if (!data) {
         SDL_LogWarn(SDL_LOG_CATEGORY_AUDIO, "missing sound %s", file.c_str());

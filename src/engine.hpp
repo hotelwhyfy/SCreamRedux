@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <functional>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <variant>
@@ -34,6 +35,8 @@ struct Options {
     bool windowed = true;
     bool verifyMedia = false;   // decode every asset and exit
     bool check = false;         // validate the built world, then exit (check.cpp)
+    bool turbo = false;         // fast-forward for automated runs: no audio or video, fast clock
+    bool crawl = false;         // visit every room/view/object and report problems (crawl.cpp)
 };
 
 class Engine {
@@ -99,6 +102,10 @@ public:
     void run();   // scRun: main loop until quit
     int checkWorld();  // --check: report missing targets, handlers and files; returns the count
     int checkResult_ = 0;
+    // --crawl (crawl.cpp): one step per frame; false when finished.
+    bool crawlStep();
+    bool crawlRender_ = false;
+    std::shared_ptr<struct Crawler> crawler_;  // shared_ptr: the type is only complete in crawl.cpp
 
     // Where the player is.
     Room* room = nullptr;

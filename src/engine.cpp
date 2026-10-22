@@ -21,6 +21,7 @@ constexpr float kPitchLimit = 1.75f;     // pitch is the look vector's y; |y| <=
 constexpr float kPx = float(sc::SCREEN_W) / Engine::kOrigW;  // canvas units per original pixel (1024x768 mode)
 constexpr float kBar = 64 * kPx;         // UI bars above and below the 3D view: 64 pixels
 constexpr double kLookDuration = 0.6;    // seconds for scLookAt(..., SC_SMOOTH)
+constexpr double kTurboStep = 0.5;       // --turbo: game seconds per frame
 
 float faceYaw(int face) {
     switch (face) {
@@ -114,7 +115,7 @@ bool Engine::init() {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "window/GL: %s", SDL_GetError());
         return false;
     }
-    SDL_GL_SetSwapInterval(1);
+    SDL_GL_SetSwapInterval(opts.turbo ? 0 : 1);
     if (const char* missing = gl::load()) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "missing GL entry point %s", missing);
         return false;
@@ -123,6 +124,7 @@ bool Engine::init() {
         return false;
     SDL_HideCursor();
     sound.init();
+    sound.setSilent(opts.turbo);
     loadSettings("scream.cfg");  // like scream.exe at startup; the window keeps the command-line mode
     mountResources();
     return true;
@@ -140,6 +142,11 @@ bool Engine::switchRoom(const std::string& name) {
     overlay = nullptr;
     View* n = r->lastVisited.empty() ? nullptr : r->node(r->lastVisited);
     node = n ? n : r->nodes.front().get();
+    // scSwitch binds what it switches to (0x4158d0); a room then its node.
+    world.bound.room = r;
+    world.bound.node = world.bound.view = node;
+    world.bound.zoom = nullptr;
+    world.bound.objects.clear();
     // Timers created with scTimerCreate belong to the location they were made in.
     std::erase_if(timers_, [](const Timer& t) { return !t.global; });
     if (!r->onEnter.empty())
@@ -156,6 +163,9 @@ bool Engine::switchNode(const std::string& name) {
     }
     beginTransition();
     node = n;
+    world.bound.room = room;
+    world.bound.node = world.bound.view = n;
+    world.bound.objects.clear();
     zooms.clear();
     overlay = nullptr;
     std::erase_if(timers_, [](const Timer& t) { return !t.global; });
@@ -179,6 +189,8 @@ bool Engine::switchZoom(const std::string& name) {
         return false;
     }
     beginTransition();
+    world.bound.zoom = world.bound.view = z;
+    world.bound.objects.clear();
     zooms.push_back(z);
     overlay = nullptr;
     playZoomAudio(z, sc::ZOOM);
@@ -193,6 +205,7 @@ bool Engine::switchOverlay(const std::string& name) {
     }
     beginTransition();
     overlay = it->second.get();
+    world.bound.overlay = overlay;
     sound.playFx(overlay->args[1]);
     return true;
 }
@@ -253,6 +266,12 @@ void Engine::zoomOut() {
     if (!zooms.empty()) {
         playZoomAudio(zooms.back(), sc::ZOOMOUT);
         zooms.pop_back();
+        // Back to a parent zoom, scream.exe switches to it again, which binds it;
+        // back to the node, nothing is rebound.
+        if (!zooms.empty()) {
+            world.bound.zoom = world.bound.view = zooms.back();
+            world.bound.objects.clear();
+        }
     }
 }
 
@@ -509,6 +528,11 @@ Object* Engine::hovered(int& edge) {
 }
 
 bool Engine::playCutscene(const std::string& file) {
+    if (opts.turbo) {
+        if (!res.exists(file))
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "missing cutscene %s", file.c_str());
+        return false;
+    }
     auto data = res.read(file);
     if (!data) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "missing cutscene %s", file.c_str());
@@ -533,7 +557,7 @@ void Engine::stopCutscene() {
 }
 
 void Engine::beginTransition(float progress) {
-    if (!window_ || capturing_)
+    if (!window_ || capturing_ || opts.turbo)
         return;
     capturing_ = true;
     render();
@@ -1099,6 +1123,13 @@ void Engine::run() {
         return;
     // The script has built the world: this is the state every new game starts from.
     captureBaseline();
+    // From now on scBind(SC_OBJECT) follows the engine state, as in scream.exe.
+    world.objectScope = [this] {
+        using S = World::Scope;
+        if (video_ || invOpen_ || journalOpen_ || menuOpen() || overlay || choice_)
+            return S::None;
+        return zooms.empty() ? S::Node : S::Zoom;
+    };
     loadUserSettings();
 
     if (!opts.start.empty()) {
@@ -1133,9 +1164,13 @@ void Engine::run() {
         double t = realTime();
         double dt = t - last;
         last = t;
+        if (opts.turbo)
+            dt = kTurboStep;  // fixed, fast game time per frame
         if (!menuOpen())
             gameClock_ += dt;
         update(dt);
+        if (opts.crawl && !crawlStep())
+            quit_ = true;
 
         if (menuPending_ && !script.busy()) {
             menuPending_ = false;
@@ -1151,7 +1186,10 @@ void Engine::run() {
             execPending = false;
             script.startCode(opts.exec, "exec");
         }
-        render();
+        if (!opts.crawl || crawlRender_) {
+            crawlRender_ = false;
+            render();
+        }
 
         if (!opts.screenshot.empty() && opts.screenshotAt >= 0) {
             if (t - started >= opts.screenshotAt) {

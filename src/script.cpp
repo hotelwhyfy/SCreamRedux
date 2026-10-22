@@ -76,8 +76,20 @@ int ScriptHost::wait(lua_State* L, Ready ready) {
     return lua_yield(L, 0);
 }
 
+namespace {
+int gWatchdogLimit = 0, gWatchdogCount = 0;
+void watchdogHook(lua_State* L, lua_Debug*) {
+    if (gWatchdogLimit && ++gWatchdogCount > gWatchdogLimit)
+        luaL_error(L, "watchdog: handler ran %d million instructions without yielding", gWatchdogLimit);
+}
+}  // namespace
+
 void ScriptHost::resume(Thread& t) {
     pending_ = nullptr;
+    gWatchdogLimit = watchdog_;
+    gWatchdogCount = 0;
+    if (watchdog_)
+        lua_sethook(t.co, watchdogHook, LUA_MASKCOUNT, 1000000);
     int status = lua_resume(t.co, 0);
     auto it = std::find_if(threads_.begin(), threads_.end(), [&](const Thread& x) { return x.co == t.co; });
     if (status == LUA_YIELD) {

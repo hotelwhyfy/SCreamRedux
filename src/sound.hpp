@@ -27,6 +27,8 @@ public:
     explicit Sound(Resources& res) : res_(res) {}
 
     bool init() { return audio_.init(); }
+    // Turbo mode: nothing plays (so nothing is waited for), but missing files are still reported.
+    void setSilent(bool silent) { silent_ = silent; }
     void update(double dt);
 
     void playFx(const std::string& file);
@@ -72,6 +74,7 @@ private:
     Audio::Handle start(const std::string& file, bool loop, float gain);
 
     Resources& res_;
+    bool silent_ = false;
     Audio audio_;
     std::map<int, Audio::Handle> channels_;
     std::map<int, std::pair<std::string, bool>> channelFiles_;  // channel -> (file, loop)

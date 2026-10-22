@@ -37,7 +37,10 @@ void usage() {
         "  --trace           log every sc* call\n"
         "  --api-status      print implementation status of all sc* functions\n"
         "  --verify-media    decode every image, sound and video in the archives\n"
-        "  --check           check the world the script builds (targets, handlers, files)\n");
+        "  --check           check the world the script builds (targets, handlers, files)\n"
+        "  --turbo           fast-forward: no audio or video, game time runs 30x\n"
+        "  --crawl           click every object, use every item reaction, run every choice\n"
+        "                    and dialogue from the start state; report warnings and errors\n");
 }
 
 // Decode every image, sound and video once; report anything that fails.
@@ -132,6 +135,8 @@ int main(int argc, char** argv) {
         else if (a == "--api-status") { printApiStatus(); return 0; }
         else if (a == "--verify-media") opts.verifyMedia = true;
         else if (a == "--check") opts.check = true;
+        else if (a == "--turbo") opts.turbo = true;
+        else if (a == "--crawl") opts.crawl = opts.turbo = true;
         else if (a == "-h" || a == "--help") { usage(); return 0; }
         else { std::fprintf(stderr, "unknown option %s\n", a.c_str()); usage(); return 2; }
     }
