@@ -88,14 +88,12 @@ bool World::bind(int kind, const std::string& name) {
         if (Room* r = room(name)) {
             bound.room = r;
             bound.node = bound.zoom = bound.view = nullptr;
-            bound.object = nullptr;
             return true;
         }
         return false;
     case sc::ZOOM:
         if (View* z = zoom(name)) {
             bound.zoom = bound.view = z;
-            bound.object = nullptr;
             return true;
         }
         return false;
@@ -107,7 +105,6 @@ bool World::bind(int kind, const std::string& name) {
             return false;
         (kind == sc::NODE ? bound.node : bound.zoom) = v;
         bound.view = v;
-        bound.object = nullptr;
         return true;
     }
     case sc::OBJECT: {

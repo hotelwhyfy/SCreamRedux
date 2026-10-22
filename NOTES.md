@@ -174,6 +174,9 @@ Verified against the shipped scripts and data while building the engine (`src/`)
   and it matters: greenhouse-int/n7 has two `hose` hotspots (`grabHose1`, `grabHose2`), each
   disabling itself; disabling both on the first grab makes `hose_quarry`, the shovel and the
   ending unreachable.
+- Each kind has its own slot (`0x49dd0c[kind]`; `0x402b40` only range-checks): binding a room,
+  node or zoom, by `scBind` or `scSwitch`, leaves the bound object alone. `grabTooth` relies on
+  it: `changeTime` (which binds nodes and the room) runs before its `scDisable(SC_OBJECT)`.
 - Nodes are found in the bound room, but zooms by name across all rooms, the first created
   winning — for `scBind(SC_ZOOM)` and `scSwitch(SC_ZOOM)` alike. Duplicate zoom names: `phone`
   / `phone-pick` (house-lobby and house-hall: the hall's version, with a clock hotspot, is

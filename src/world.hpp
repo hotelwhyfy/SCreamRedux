@@ -118,7 +118,8 @@ public:
         View* node = nullptr;
         View* zoom = nullptr;
         View* view = nullptr;           // whichever of node/zoom was bound last
-        Object* object = nullptr;       // one object (0x402ce0 binds a single index)
+        Object* object = nullptr;       // one object (0x402ce0 binds a single index; binding
+                                        // a room/node/zoom leaves it bound: one slot per kind)
         Item* item = nullptr;
         Dialogue* dialogue = nullptr;
         Choice* choice = nullptr;

@@ -146,7 +146,6 @@ bool Engine::switchRoom(const std::string& name) {
     world.bound.room = r;
     world.bound.node = world.bound.view = node;
     world.bound.zoom = nullptr;
-    world.bound.object = nullptr;
     // Timers created with scTimerCreate belong to the location they were made in.
     std::erase_if(timers_, [](const Timer& t) { return !t.global; });
     if (!r->onEnter.empty())
@@ -165,7 +164,6 @@ bool Engine::switchNode(const std::string& name) {
     node = n;
     world.bound.room = room;
     world.bound.node = world.bound.view = n;
-    world.bound.object = nullptr;
     zooms.clear();
     overlay = nullptr;
     std::erase_if(timers_, [](const Timer& t) { return !t.global; });
@@ -187,7 +185,6 @@ bool Engine::switchZoom(const std::string& name) {
     }
     beginTransition();
     world.bound.zoom = world.bound.view = z;
-    world.bound.object = nullptr;
     zooms.push_back(z);
     overlay = nullptr;
     playZoomAudio(z, sc::ZOOM);
@@ -267,7 +264,6 @@ void Engine::zoomOut() {
         // back to the node, nothing is rebound.
         if (!zooms.empty()) {
             world.bound.zoom = world.bound.view = zooms.back();
-            world.bound.object = nullptr;
         }
     }
 }
