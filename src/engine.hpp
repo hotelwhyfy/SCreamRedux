@@ -78,6 +78,9 @@ public:
     std::string subtitles;
     std::map<int, std::pair<int, int>> ambience;  // scSetAmbience: key -> (preset, flag)
 
+    bool flag(int f) const;  // scEnable/scDisable state
+    void snapAmbience() { fx_.snap = true; }  // scSetAmbience(..., 1): no fade
+
     // Locate a file in the data directories (last match wins).
     std::filesystem::path findData(const std::string& name) const;
 
@@ -216,7 +219,24 @@ private:
     void layoutJournal();
     void journalClick();
     void drawJournal();
-    void drawHeldCursor();    Object* hovered(int& edge);
+    void drawHeldCursor();
+
+    // Sky, weather and lighting (effects.cpp).
+    struct Effects {
+        bool initialized = false, snap = false;
+        std::array<float, 3> sky{}, horizon{}, cloud{};
+        double cloudScroll = 0, fogScroll = 0, rainScroll = 0;
+        float cloudA = 1, cloudB = 0, cloudTimer = 0;  // layer A starts visible
+        int cloudState = 0;
+        double lightningClock = 0, flickerClock = 0;
+        float fov = 45;
+        int fovDir = 1;
+    } fx_;
+    void updateEffects(double dt);
+    std::array<const RendererTexture*, 6> faceMasks(const View& v);
+    void drawNodeScene(const View& v, const Viewport& vp);
+    void applyLighting(const std::function<void(float, float, float, float, Blend)>& overlay,
+                       const std::function<void(float, float, float, float, Blend)>& wash);    Object* hovered(int& edge);
     Viewport nodeViewport() const;
     void panCamera(double dt);
     void drawCursor(Object* hover, int edge);
@@ -225,6 +245,7 @@ private:
     // size (the DC update ships 1024x640 replacements for 800x472 originals).
     struct ZoomRect { float x, y, w, h; };
     ZoomRect zoomRect(const View& z);
+    void drawZoomEffects(const RendererTexture& image, const ZoomRect& zr);
     static constexpr float kZoomW = 800, kZoomH = 472;
     bool showHotspots() const {
         auto it = settings.find(sc::SHOW_HOTSPOTS);

@@ -68,16 +68,28 @@ const char* kVertex = R"(#version 330 core
 layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec2 aUv;
 uniform mat4 uMvp;
+uniform vec4 uUvXform;  // uv * xy + zw
 out vec2 vUv;
-void main() { vUv = aUv; gl_Position = uMvp * vec4(aPos, 1.0); }
+out vec2 vMaskUv;
+void main() {
+    vUv = aUv * uUvXform.xy + uUvXform.zw;
+    vMaskUv = aUv;
+    gl_Position = uMvp * vec4(aPos, 1.0);
+}
 )";
 
 const char* kFragment = R"(#version 330 core
 in vec2 vUv;
+in vec2 vMaskUv;
 uniform sampler2D uTex;
+uniform sampler2D uMask;
+uniform int uUseMask;
 uniform vec4 uTint;
 out vec4 color;
-void main() { color = texture(uTex, vUv) * uTint; }
+void main() {
+    color = texture(uTex, vUv) * uTint;
+    if (uUseMask == 1) color.a *= texture(uMask, vMaskUv).r;
+}
 )";
 
 gl::GLuint compile(gl::GLenum type, const char* src) {
@@ -181,6 +193,9 @@ bool Renderer::init() {
     uMvp_ = gl::GetUniformLocation(program_, "uMvp");
     uTint_ = gl::GetUniformLocation(program_, "uTint");
     uTex_ = gl::GetUniformLocation(program_, "uTex");
+    uMask_ = gl::GetUniformLocation(program_, "uMask");
+    uUseMask_ = gl::GetUniformLocation(program_, "uUseMask");
+    uUvXform_ = gl::GetUniformLocation(program_, "uUvXform");
 
     gl::GenVertexArrays(1, &vao_);
     gl::BindVertexArray(vao_);
@@ -193,6 +208,7 @@ bool Renderer::init() {
 
     const uint8_t white[4] = {255, 255, 255, 255};
     white_ = uploadTexture(1, 1, white, false);
+    buildDome();
     return true;
 }
 
@@ -205,6 +221,9 @@ void Renderer::beginFrame(int width, int height) {
     gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
     gl::UseProgram(program_);
     gl::Uniform1i(uTex_, 0);
+    gl::Uniform1i(uMask_, 1);
+    gl::Uniform1i(uUseMask_, 0);
+    gl::Uniform4f(uUvXform_, 1, 1, 0, 0);
     gl::ActiveTexture(gl::TEXTURE0);
     gl::BindVertexArray(vao_);
     gl::BindBuffer(gl::ARRAY_BUFFER, vbo_);
@@ -216,10 +235,22 @@ void Renderer::setViewport3D(const Viewport& vp, const Camera& cam) {
     gl::UniformMatrix4fv(uMvp_, 1, 0, mvp.data());
 }
 
-void Renderer::drawNode(const View& node, const Camera& cam, const Viewport& vp) {
+void Renderer::applyBlend(Blend b) {
+    switch (b) {
+    case Blend::Opaque: gl::Disable(gl::BLEND); return;
+    case Blend::Alpha: gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA); break;
+    case Blend::AddAlpha: gl::BlendFunc(gl::SRC_ALPHA, gl::ONE); break;
+    case Blend::AddOne: gl::BlendFunc(gl::ONE, gl::ONE); break;
+    case Blend::DstColor: gl::BlendFunc(gl::DST_COLOR, gl::ONE_MINUS_SRC_ALPHA); break;
+    }
+    gl::Enable(gl::BLEND);
+}
+
+void Renderer::drawNode(const View& node, const Camera& cam, const Viewport& vp, const Pass& pass) {
     setViewport3D(vp, cam);
-    gl::Uniform4f(uTint_, tint_[0], tint_[1], tint_[2], 1);
-    gl::Disable(gl::BLEND);
+    applyBlend(pass.blend);
+    const float r = pass.r * tint_[0], g = pass.g * tint_[1], bl = pass.b * tint_[2];
+    gl::Uniform4f(uTint_, r, g, bl, pass.a);
     // The decoder hands back rows top-first, so v = 0 is the top of the image.
     for (int f = sc::FRONT; f <= sc::DOWN; ++f) {
         const FaceBasis& b = faceBasis(f);
@@ -229,14 +260,88 @@ void Renderer::drawNode(const View& node, const Camera& cam, const Viewport& vp)
         };
         std::array<std::array<float, 5>, 4> q = {corner(0, 0), corner(1, 0), corner(0, 1), corner(1, 1)};
         gl::BufferData(gl::ARRAY_BUFFER, sizeof q, q.data(), gl::DYNAMIC_DRAW);
+        const RendererTexture* mask = pass.masks ? (*pass.masks)[size_t(f - 1)] : nullptr;
+        if (mask) {
+            gl::ActiveTexture(gl::TEXTURE0 + 1);
+            gl::BindTexture(gl::TEXTURE_2D, mask->id);
+            gl::ActiveTexture(gl::TEXTURE0);
+        }
+        gl::Uniform1i(uUseMask_, mask ? 1 : 0);
         auto it = textures_.find(node.faces[f - 1]);
-        gl::BindTexture(gl::TEXTURE_2D, it != textures_.end() ? it->second.id : white_);
-        if (it == textures_.end())
-            gl::Uniform4f(uTint_, 0.15f, 0.0f, 0.15f, 1);  // missing texture: dark magenta
+        bool have = it != textures_.end() && it->second.id;
+        gl::BindTexture(gl::TEXTURE_2D, have ? it->second.id : white_);
+        if (!have)
+            gl::Uniform4f(uTint_, 0.15f, 0.0f, 0.15f, pass.a);  // missing texture: dark magenta
         gl::DrawArrays(gl::TRIANGLE_STRIP, 0, 4);
-        gl::Uniform4f(uTint_, tint_[0], tint_[1], tint_[2], 1);
+        gl::Uniform4f(uTint_, r, g, bl, pass.a);
     }
+    gl::Uniform1i(uUseMask_, 0);
     gl::Viewport(0, 0, width_, height_);
+}
+
+void Renderer::buildDome() {
+    // Latitude/longitude sphere; u = longitude, v = 0 at the zenith .. 1 at the nadir.
+    const int lat = 24, lon = 48;
+    std::vector<float> v;
+    auto vert = [&](int i, int j) {
+        float th = kPi * float(i) / lat, ph = 2 * kPi * float(j) / lon;
+        v.insert(v.end(), {std::sin(th) * std::cos(ph), std::cos(th), std::sin(th) * std::sin(ph),
+                           float(j) / lon, float(i) / lat});
+    };
+    for (int i = 0; i < lat; ++i)
+        for (int j = 0; j < lon; ++j) {
+            vert(i, j); vert(i + 1, j); vert(i, j + 1);
+            vert(i, j + 1); vert(i + 1, j); vert(i + 1, j + 1);
+        }
+    domeVertices_ = int(v.size() / 5);
+    gl::GenBuffers(1, &domeVbo_);
+    gl::BindBuffer(gl::ARRAY_BUFFER, domeVbo_);
+    gl::BufferData(gl::ARRAY_BUFFER, gl::GLsizeiptr(v.size() * sizeof(float)), v.data(), gl::STATIC_DRAW);
+    gl::BindBuffer(gl::ARRAY_BUFFER, vbo_);
+}
+
+void Renderer::drawDome(const Camera& cam, const Viewport& vp, const RendererTexture* tex, const Pass& pass,
+                        float uScale, float vScale, float uOffset, float vOffset) {
+    setViewport3D(vp, cam);
+    applyBlend(pass.blend);
+    gl::BindTexture(gl::TEXTURE_2D, tex ? tex->id : white_);
+    gl::Uniform4f(uTint_, pass.r, pass.g, pass.b, pass.a);
+    gl::Uniform4f(uUvXform_, uScale, vScale, uOffset, vOffset);
+    gl::BindBuffer(gl::ARRAY_BUFFER, domeVbo_);
+    gl::VertexAttribPointer(0, 3, gl::FLOAT, 0, 5 * sizeof(float), nullptr);
+    gl::VertexAttribPointer(1, 2, gl::FLOAT, 0, 5 * sizeof(float), reinterpret_cast<void*>(3 * sizeof(float)));
+    gl::DrawArrays(gl::TRIANGLES, 0, domeVertices_);
+    gl::BindBuffer(gl::ARRAY_BUFFER, vbo_);
+    gl::VertexAttribPointer(0, 3, gl::FLOAT, 0, 5 * sizeof(float), nullptr);
+    gl::VertexAttribPointer(1, 2, gl::FLOAT, 0, 5 * sizeof(float), reinterpret_cast<void*>(3 * sizeof(float)));
+    gl::Uniform4f(uUvXform_, 1, 1, 0, 0);
+    gl::Viewport(0, 0, width_, height_);
+}
+
+void Renderer::drawImagePass(const RendererTexture& t, float x, float y, float w, float h, const Pass& pass) {
+    gl::BindTexture(gl::TEXTURE_2D, t.id);
+    gl::Uniform4f(uTint_, pass.r, pass.g, pass.b, pass.a);
+    quad2D(x, y, w, h, 0, 0, 1, 1, pass.blend);
+}
+
+void Renderer::drawRectPass(float x, float y, float w, float h, const Pass& pass) {
+    drawImagePass(RendererTexture{white_, 1, 1}, x, y, w, h, pass);
+}
+
+void Renderer::setRepeat(const RendererTexture& t) {
+    gl::BindTexture(gl::TEXTURE_2D, t.id);
+    gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::REPEAT);
+    gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::REPEAT);
+}
+
+const RendererTexture* Renderer::optionalTexture(Resources& res, const std::string& name) {
+    if (auto it = textures_.find(name); it != textures_.end())
+        return it->second.id ? &it->second : nullptr;
+    if (!res.exists(name)) {
+        textures_[name] = {};
+        return nullptr;
+    }
+    return texture(res, name);
 }
 
 void Renderer::drawNodeHotspots(const View& node, const Camera& cam, const Viewport& vp) {
@@ -269,15 +374,14 @@ void Renderer::drawNodeHotspots(const View& node, const Camera& cam, const Viewp
     gl::Viewport(0, 0, width_, height_);
 }
 
-void Renderer::quad2D(float x, float y, float w, float h, float u0, float v0, float u1, float v1) {
+void Renderer::quad2D(float x, float y, float w, float h, float u0, float v0, float u1, float v1, Blend blend) {
     Mat4 mvp = ortho(0, float(width_), float(height_), 0);
     gl::UniformMatrix4fv(uMvp_, 1, 0, mvp.data());
     float x0 = canvas_.x + x * canvas_.scale, y0 = canvas_.y + y * canvas_.scale;
     float x1 = x0 + w * canvas_.scale, y1 = y0 + h * canvas_.scale;
     float q[4][5] = {{x0, y0, 0, u0, v0}, {x1, y0, 0, u1, v0}, {x0, y1, 0, u0, v1}, {x1, y1, 0, u1, v1}};
     gl::BufferData(gl::ARRAY_BUFFER, sizeof q, q, gl::DYNAMIC_DRAW);
-    gl::Enable(gl::BLEND);
-    gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
+    applyBlend(blend);
     gl::DrawArrays(gl::TRIANGLE_STRIP, 0, 4);
 }
 

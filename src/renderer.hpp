@@ -45,16 +45,42 @@ struct Canvas {
     float toCanvasY(float py) const { return (py - y) / scale; }
 };
 
+struct RendererTexture {
+    gl::GLuint id = 0;
+    int width = 0, height = 0;
+};
+
+// How an extra pass over the scene combines with what is already drawn
+// (the blend modes scream.exe's effects use).
+enum class Blend { Opaque, Alpha, AddAlpha, AddOne, DstColor };
+
+struct RenderPass {
+    float r = 1, g = 1, b = 1, a = 1;
+    Blend blend = Blend::Opaque;
+    // Per-face masks (face - 1); a mask's luminance becomes the face's alpha,
+    // so a backdrop (sky, fog, rain) shows through the black parts.
+    const std::array<const RendererTexture*, 6>* masks = nullptr;
+};
+
 class Renderer {
 public:
-    struct Texture {
-        gl::GLuint id = 0;
-        int width = 0, height = 0;
-    };
+    using Texture = RendererTexture;
 
     bool init();
     void beginFrame(int width, int height);
-    void drawNode(const View& node, const Camera& cam, const Viewport& vp);
+    using Pass = RenderPass;
+    void drawNode(const View& node, const Camera& cam, const Viewport& vp, const Pass& pass = {});
+    // Sphere around the viewer (sky, fog, rain backdrops). v runs from the zenith (0)
+    // to the nadir (1); tex = nullptr draws a flat colour.
+    void drawDome(const Camera& cam, const Viewport& vp, const RendererTexture* tex, const Pass& pass,
+                  float uScale, float vScale, float uOffset, float vOffset);
+    // Extra full-texture pass in canvas coordinates (zoom effects).
+    void drawImagePass(const RendererTexture& t, float x, float y, float w, float h, const Pass& pass);
+    void drawRectPass(float x, float y, float w, float h, const Pass& pass);
+    // Wrap a texture instead of clamping (tiling clouds and rain).
+    void setRepeat(const RendererTexture& t);
+    // Look a texture up only if the resource exists (optional masks), without warnings.
+    const RendererTexture* optionalTexture(Resources& res, const std::string& name);
     // Debug overlay (SC_SHOW_HOTSPOTS): enabled objects as translucent rects on their faces.
     void drawNodeHotspots(const View& node, const Camera& cam, const Viewport& vp);
     // Draw a texture in canvas coordinates (800x600 space).
@@ -79,10 +105,15 @@ public:
 
 private:
     void setViewport3D(const Viewport& vp, const Camera& cam);
-    void quad2D(float x, float y, float w, float h, float u0 = 0, float v0 = 0, float u1 = 1, float v1 = 1);
+    void quad2D(float x, float y, float w, float h, float u0 = 0, float v0 = 0, float u1 = 1, float v1 = 1,
+                Blend blend = Blend::Alpha);
 
     gl::GLuint program_ = 0, vao_ = 0, vbo_ = 0;
-    gl::GLint uMvp_ = -1, uTint_ = -1, uTex_ = -1;
+    gl::GLint uMvp_ = -1, uTint_ = -1, uTex_ = -1, uMask_ = -1, uUseMask_ = -1, uUvXform_ = -1;
+    gl::GLuint domeVbo_ = 0;
+    int domeVertices_ = 0;
+    void applyBlend(Blend b);
+    void buildDome();
     gl::GLuint white_ = 0;
     std::array<float, 3> tint_{1, 1, 1};
     int width_ = 0, height_ = 0;

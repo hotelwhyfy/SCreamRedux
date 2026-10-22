@@ -598,6 +598,7 @@ void Engine::update(double dt) {
         return;
     }
     double t = now();
+    updateEffects(dt);
     if (camAnim_.active) {
         double k = std::min(1.0, (t - camAnim_.t0) / camAnim_.duration);
         float s = float(k * k * (3 - 2 * k));  // smoothstep
@@ -696,13 +697,15 @@ void Engine::render() {
         for (const auto& f : v->faces)
             renderer.texture(res, f);
         Viewport vp = nodeViewport();
-        renderer.drawNode(*v, cam, vp);
+        drawNodeScene(*v, vp);
         if (showHotspots())
             renderer.drawNodeHotspots(*v, cam, vp);
     } else if (v) {
         ZoomRect zr = zoomRect(*v);
-        if (auto* t = renderer.texture(res, v->image))
+        if (auto* t = renderer.texture(res, v->image)) {
             renderer.drawImage(*t, zr.x, zr.y, zr.w, zr.h);
+            drawZoomEffects(*t, zr);
+        }
         if (showHotspots()) {
             float sx = zr.w / kZoomW, sy = zr.h / kZoomH;
             for (auto& o : v->objects)

@@ -221,6 +221,27 @@ ECX), so Ghidra's decompiler hides arguments; read the disassembly alongside. Sc
 - Saves are this port's own format (`src/save.cpp`): script globals as a diff against the
   start-of-game baseline, plus world/engine state. A new game restores that baseline.
 
+### Effects (from `scream.exe`, implemented in `src/effects.cpp`)
+
+- `scEnable`/`scDisable` keys → flags (`0x40fa60`): SKY `0x4df8de8`, NIGHT `…dec`, RAIN `…df4`,
+  FOG `…df8`, GLOW `…df0` (never read), DREAM `…dfc`, CANDLE `…e00`, LAMP `…e04`, WAIT `…de4`;
+  HINTS / SHOW_HOTSPOTS / SURROUND share their setting's variable.
+- Each face's `<texture>_msk.tga` (512² grey) is its alpha: black areas show a backdrop. With
+  SC_SKY a dome tinted by the SKY_COLOR preset plus a horizon glow through `gradient.tga`, and
+  two cloud layers (`clouds1/2.tga`, or `sky_def.tga` in the 2006 data) tinted by the
+  CLOUD_COLOR preset, crossfading (`0x40d990`) and scrolling by SC_SKY_SPEED/10. Else SC_FOG:
+  dark dome + clouds1 at 50%. Else SC_RAIN: `rain_def.tga` streaks, tiled 2×, fast scroll.
+- Presets (sky / horizon / clouds): DAWN (1,.8,.55)/(.8,.05,.05)/(1,.7,.55); MORNING
+  (.9,.9,.9)/(.55,.65,.8)/(.75,.75,.75); DUSK (.45,.5,.6)/(1,0,0)/(.95,.55,.45); STORM
+  (.7,.7,.9)/(.15,.15,.8)/(.3,.3,.3). Changes fade at 0.0001/frame unless the third
+  scSetAmbience argument is 1. SCREEN_COLOR is stored but its use hasn't been found.
+- Lighting (`0x409b50`): NIGHT draws the scene again tinted (.1,.1,.5) at 50%. RAIN without a
+  candle: storm dimming plus lightning on a 30.5 s schedule (flashes at 10, 10.15, 15, 20, 20.2,
+  30 s; strengths 0.25/0.5/0.75 additive + white wash). CANDLE/LAMP: warm (1,.75,.5) additive
+  flicker on a 2.5 s schedule; the lamp shifts it 0.25 s and lowers the alpha.
+- Field of view is 45° vertical (reset every frame, `0x407c30`); SC_DREAM drifts it between
+  35° and 55° at 0.005°/frame. (SC_DEF_FOV 53 in scream.sc is not what the renderer uses.)
+
 ## Porting strategy
 
 Embed Lua 5.1 and run the original `scream.sc` + `scratches.sc` unmodified; reimplement the

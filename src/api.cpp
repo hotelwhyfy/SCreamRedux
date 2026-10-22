@@ -91,6 +91,9 @@ int setEnabled(lua_State* L, bool on) {
     }
     if (on) E->flags.insert(key);
     else E->flags.erase(key);
+    // These keys share their variable with the setting of the same name (0x40fa60).
+    if (key == sc::HINTS || key == sc::SHOW_HOTSPOTS || key == sc::SURROUND)
+        E->settings[key] = on ? 1.0 : 0.0;
     return 0;
 }
 int scEnable(lua_State* L) { return setEnabled(L, true); }
@@ -100,8 +103,11 @@ int scDisable(lua_State* L) { return setEnabled(L, false); }
 // are recorded but don't reconfigure the running engine.
 int scLoadSettings(lua_State* L) { E->loadSettings(argStr(L, 1)); return 0; }
 
+// Presets for SC_SKY_COLOR / SC_CLOUD_COLOR / SC_SCREEN_COLOR; a third argument of 1
+// switches at once, 0 fades slowly (0x40ca50).
 int scSetAmbience(lua_State* L) {
     E->ambience[argInt(L, 1)] = {argInt(L, 2), argInt(L, 3)};
+    if (argInt(L, 3) != 0) E->snapAmbience();
     return 0;
 }
 
@@ -456,8 +462,8 @@ const Entry kEntries[] = {
     FN(scCreate, S::Done, ""),
     FN(scCursor, S::Done, ""),
     FN(scCutscene, S::Done, "click/Esc/Space skips"),
-    FN(scDisable, S::Partial, "objects done; effect flags stored only"),
-    FN(scEnable, S::Partial, "objects done; effect flags stored only"),
+    FN(scDisable, S::Done, "objects, sky/fog/rain/night/candle/lamp/dream; SC_GLOW unused in the original too"),
+    FN(scEnable, S::Done, "objects, sky/fog/rain/night/candle/lamp/dream; SC_GLOW unused in the original too"),
     FN(scEnd, S::Done, ""),
     FN(scFXPlay, S::Done, "string form or scFXPlayEx-style"),
     FN(scFXPlayEx, S::Done, "arg3 = wait, arg4 = loop"),
@@ -512,7 +518,7 @@ const Entry kEntries[] = {
     FN(scScriptAdd, S::Done, ""),
     FN(scScriptGo, S::Done, ""),
     FN(scSet, S::Done, ""),
-    FN(scSetAmbience, S::Partial, "stored; needs sky/colour effects"),
+    FN(scSetAmbience, S::Partial, "sky and cloud colours; SC_SCREEN_COLOR use not found yet"),
     FN(scSetLastVisited, S::Done, ""),
     FN(scSleep, S::Done, "freezes camera input while sleeping"),
     FN(scStill, S::Done, ""),

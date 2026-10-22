@@ -13,9 +13,10 @@ No game data is included. You need your own copy of the game.
 The Director's Cut is playable from start to finish in principle: intro and
 main menu, both campaigns, cube-map scenes with the original camera behaviour
 and hotspots, close-ups, Theora cutscenes, Vorbis sound/music/voices,
-subtitles, dialogue choices, inventory (with the tutorial hints), journal, and
-save/load. Not yet: sky/weather effects (fog, rain, night, candle light), the
-"alternate control" mouse-look option, and the 2006 release (Lua 5.0 scripts).
+subtitles, dialogue choices, inventory (with the tutorial hints), journal,
+save/load, and the sky/fog/rain/night/candle/lightning effects. Not yet: the
+"alternate control" mouse-look option, .srt subtitles for the DC intro, and the
+2006 release (Lua 5.0 scripts).
 `scream --api-status` lists the state of all 87 API functions. A full
 play-through hasn't been done yet, so expect script-specific bugs.
 

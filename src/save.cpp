@@ -276,6 +276,7 @@ bool Engine::restoreState(const std::string& data) {
             loops.push_back(l);
         }
     }
+    fx_.snap = true;  // restored ambience applies at once
     if (!music.empty())
         if (auto it = world.tracks.find(music); it != world.tracks.end())
             sound.playTrack(*it->second);
