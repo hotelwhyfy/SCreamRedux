@@ -47,6 +47,7 @@ constexpr GLenum UNPACK_ALIGNMENT = 0x0CF5, PACK_ALIGNMENT = 0x0D05;
     X(void, ActiveTexture, GLenum)                                                                 \
     X(void, TexImage2D, GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLenum, GLenum, const void*) \
     X(void, TexParameteri, GLenum, GLenum, GLint)                                                  \
+    X(void, CopyTexImage2D, GLenum, GLint, GLenum, GLint, GLint, GLsizei, GLsizei, GLint)          \
     X(void, GenerateMipmap, GLenum)                                                                \
     X(GLuint, CreateShader, GLenum)                                                                \
     X(void, ShaderSource, GLuint, GLsizei, const GLchar* const*, const GLint*)                     \

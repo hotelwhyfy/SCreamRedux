@@ -122,6 +122,8 @@ public:
     // scream.exe's default screen mode; its text layout is in these pixels.
     static constexpr int kOrigW = 1024, kOrigH = 768;
     bool feedbackShown() const { return feedback_.count > 0; }
+    // Start a crossfade from what is on screen now (0x407ad0; 0x407b20 starts at 0.75).
+    void beginTransition(float progress = 0);
     bool hintsOn() const;  // SC_HINTS (0x4df8d38)
     void clearFeedback() { feedback_.count = 0; }
     void loadSubtitles(const std::string& file);
@@ -298,6 +300,18 @@ private:
         float fade = 1;      // 1 = transparent
     } feedback_;
     double frameDt_ = 0;  // last frame's length, for the per-frame fades
+
+    // View transitions: before a state change the old screen is rendered and
+    // captured (0x407ad0); each screen then draws the capture's view area over
+    // itself, fading it out by SC_MOV_SPEED / 1000 per 60 Hz frame.
+    struct Transition {
+        bool active = false;
+        float progress = 0;  // 0x48baf0: the capture's alpha is 1 - progress
+        Renderer::Texture capture;
+        float u0 = 0, v0 = 0, u1 = 0, v1 = 0;  // view area in the capture
+    } transition_;
+    bool capturing_ = false;
+    void drawTransition();
 
     // scLoadSubtitle: .srt cues shown through the feedback text (0x4180b0).
     struct Subtitles {

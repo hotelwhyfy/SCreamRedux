@@ -134,6 +134,7 @@ bool Engine::switchRoom(const std::string& name) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "scSwitch: no room %s", name.c_str());
         return false;
     }
+    beginTransition();
     room = r;
     zooms.clear();
     overlay = nullptr;
@@ -153,6 +154,7 @@ bool Engine::switchNode(const std::string& name) {
                     room ? room->name.c_str() : "(none)");
         return false;
     }
+    beginTransition();
     node = n;
     zooms.clear();
     overlay = nullptr;
@@ -176,6 +178,7 @@ bool Engine::switchZoom(const std::string& name) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "no zoom %s", name.c_str());
         return false;
     }
+    beginTransition();
     zooms.push_back(z);
     overlay = nullptr;
     playZoomAudio(z, sc::ZOOM);
@@ -188,7 +191,9 @@ bool Engine::switchOverlay(const std::string& name) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "no overlay %s", name.c_str());
         return false;
     }
+    beginTransition();
     overlay = it->second.get();
+    sound.playFx(overlay->args[1]);
     return true;
 }
 
@@ -242,6 +247,8 @@ void Engine::playZoomAudio(const View* zoom, int when) {
 }
 
 void Engine::zoomOut() {
+    if (!zooms.empty())
+        beginTransition();
     overlay = nullptr;
     if (!zooms.empty()) {
         playZoomAudio(zooms.back(), sc::ZOOMOUT);
@@ -250,6 +257,8 @@ void Engine::zoomOut() {
 }
 
 void Engine::zoomBack() {
+    if (!zooms.empty())
+        beginTransition();
     overlay = nullptr;
     if (!zooms.empty())
         playZoomAudio(zooms.back(), sc::ZOOMOUT);
@@ -455,7 +464,7 @@ Viewport Engine::nodeViewport() const {
 
 Object* Engine::hovered(int& edge) {
     edge = 0;
-    if (invOpen_ || journalOpen_)
+    if (invOpen_ || journalOpen_ || overlay)
         return nullptr;
     int w, h;
     SDL_GetWindowSizeInPixels(window_, &w, &h);
@@ -517,7 +526,46 @@ bool Engine::playCutscene(const std::string& file) {
     return true;
 }
 
-void Engine::stopCutscene() { video_.reset(); }
+void Engine::stopCutscene() {
+    if (video_)
+        beginTransition();  // from the last video frame (0x416d13)
+    video_.reset();
+}
+
+void Engine::beginTransition(float progress) {
+    if (!window_ || capturing_)
+        return;
+    capturing_ = true;
+    render();
+    capturing_ = false;
+    renderer.captureFrame(transition_.capture);
+    int w = transition_.capture.width, h = transition_.capture.height;
+    if (w <= 0 || h <= 0)
+        return;
+    Canvas c = Canvas::fit(w, h);
+    transition_.u0 = c.x / float(w);
+    transition_.u1 = (c.x + sc::SCREEN_W * c.scale) / float(w);
+    transition_.v0 = 1 - (c.y + kBar * c.scale) / float(h);  // the capture is bottom row first
+    transition_.v1 = 1 - (c.y + (sc::SCREEN_H - kBar) * c.scale) / float(h);
+    transition_.progress = progress;
+    transition_.active = true;
+}
+
+// The capture over the view between the bars; the step is per frame drawn (x 60/fps).
+void Engine::drawTransition() {
+    Transition& t = transition_;
+    if (!t.active || capturing_)
+        return;
+    renderer.drawImageUV(t.capture, 0, kBar, sc::SCREEN_W, sc::SCREEN_H - 2 * kBar, t.u0, t.v0, t.u1, t.v1,
+                         1 - t.progress);
+    double speed = 25;
+    if (auto* v = std::get_if<double>(&settings[sc::MOV_SPEED])) speed = *v;
+    t.progress += float(speed * 0.001 * frameDt_ * 60);
+    if (t.progress >= 1) {
+        t.active = false;
+        t.progress = 0;
+    }
+}
 
 void Engine::showChoice(const std::string& name) {
     auto it = world.choices.find(name);
@@ -647,6 +695,13 @@ void Engine::click() {
     }
     if (invOpen_) {
         inventoryClick();
+        return;
+    }
+    if (overlay) {
+        // A click dismisses the overlay, with a crossfade and its leave sound.
+        beginTransition();
+        sound.playFx(overlay->args[2]);
+        overlay = nullptr;
         return;
     }
     if (choice_) {
@@ -819,6 +874,7 @@ void Engine::update(double dt) {
 // mode is on (scWait), in which case the wait cursor shows.
 void Engine::drawCursor(Object* hover, int edge) {
     int kind;
+    if (capturing_) return;
     if (aborted_ || (locked && !waitMode && !menuOpen())) return;
     if (held && !locked && !menuOpen()) {
         drawHeldCursor();
@@ -849,6 +905,7 @@ void Engine::render() {
         return;
     if (menuOpen()) {
         drawMenu();
+        drawTransition();
         drawCursor(nullptr, 0);
         return;
     }
@@ -865,6 +922,8 @@ void Engine::render() {
     View* v = view();
     if (journalOpen_) {
         drawJournal();
+        drawTransition();
+        drawFeedback();
         drawCursor(nullptr, 0);
         return;
     }
@@ -896,6 +955,7 @@ void Engine::render() {
             renderer.drawImage(*t, 0, kBar, sc::SCREEN_W, sc::SCREEN_H - 2 * kBar);
 
     renderer.setTint(1, 1, 1);
+    drawTransition();
 
     ensureFont();
     if (invOpen_)

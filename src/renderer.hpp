@@ -98,6 +98,8 @@ public:
     // (Re)fill a texture owned by the caller, e.g. a video frame.
     void uploadInto(Texture& t, int w, int h, const uint8_t* rgba);
     void release(Texture& t);
+    // Copy the current back buffer (the whole window) into `t` (bottom row first).
+    void captureFrame(Texture& t);
     void evictAll();
 
     // Read back the frame (RGBA, bottom row first).

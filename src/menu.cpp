@@ -30,6 +30,7 @@ double settingNum(const std::map<int, Engine::Value>& s, int key, double def) {
 void Engine::openMenu() {
     if (menuOpen())
         return;
+    beginTransition();  // 0x412cb0
     menu_ = Screen::Main;
     invOpen_ = journalOpen_ = false;
     sound.pauseGame(true);
@@ -38,6 +39,7 @@ void Engine::openMenu() {
 }
 
 void Engine::closeMenu() {
+    beginTransition();
     menu_ = Screen::None;
     sound.stopMenuMusic();
     sound.pauseGame(false);

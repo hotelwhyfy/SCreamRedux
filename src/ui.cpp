@@ -168,12 +168,14 @@ void Engine::openJournal() {
     if (!journalFont_.loaded() && !journalFont_.load(renderer, res, journalConfig.font))
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "cannot load journal font %s", journalConfig.font.c_str());
     clearFeedback();
+    beginTransition();
     journalOpen_ = true;  // at the page last shown (0x418580)
     invOpen_ = false;
     sound.playFx(journalConfig.openSound);
 }
 
 void Engine::closeJournal() {
+    beginTransition();
     journalOpen_ = false;
     sound.playFx(journalConfig.closeSound);
 }

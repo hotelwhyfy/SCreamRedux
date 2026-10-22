@@ -186,8 +186,9 @@ ECX), so Ghidra's decompiler hides arguments; read the disassembly alongside. Sc
   ZOOM pushes (unless re-showing after ZOOMOUT); ZOOMOUT pops one; ZOOMBACK pops all;
   OVERLAY switches to overlay state. The zoom stack lives in the room struct (+0x13c4).
 - `scOnEnter`/`scOnExit` store hooks on the bound room (+0x188/+0x1bc); only +0x188 is ever
-  called. `scOverlay(a,b,c)` copies three strings into the bound SC_OVERLAY object; the
-  overlay draw (`0x40aae0`) puts one texture over the 3D view area.
+  called. `scOverlay(image, enterSound, leaveSound)` (`0x412a00`: +0x34/+0x64/+0x94); the
+  overlay draw (`0x40aae0`) puts the image over the view area; a click (state 0xfa4) dismisses
+  it with a crossfade and the leave sound.
 - `scChoiceClear` sets the option count to 0; `scChoiceRemove` deletes the option at +0x38
   (the last pick) and shifts the rest.
 - `scPlaylist*` (`0x4165e0`–`0x4168f0`, driven from `0x40ee00`): up to 38 tracks, 1-based
@@ -274,9 +275,15 @@ ECX), so Ghidra's decompiler hides arguments; read the disassembly alongside. Sc
   (0.1, 1, 1). Hit rows span the full width, 8 px above the text; with 3 options the hit
   numbering shifts by one. 16 options max (`0x403e30`). The centred variant (EAX=1, top row
   white) is the menu's prompt list (`0x412fa0`).
-- View transitions: `scSwitch` (`0x4158d0`) and other state changes capture the screen
-  (`0x407ad0`, flag `0x48badc`); each state's renderer then fades that capture out at
-  `0x4df8d10`·0.001 per frame (default 25). Not ported yet.
+- View transitions: before every `scSwitch` kind (`0x4158d0`; ZOOMOUT only when a zoom is
+  open), journal open/close (`0x418580`/`0x4185f0`), the menu (`0x412cb0`), a click leaving an
+  overlay (`0x414501`) and the end of a cutscene (`0x416d13`), the old screen is rendered
+  (flag `0x48bc0c`) and copied to a texture (`0x407ad0`, flag `0x48badc`, progress `0x48baf0`
+  = 0). Each screen's renderer then draws the capture over the view area (between the bars)
+  at alpha 1 − progress and adds SC_MOV_SPEED (`0x4df8d10`, key 1018, default 25, LO/MED/HI →
+  25/50/75)·0.001 per frame (×60/fps). `0x407b20` starts at 0.75 (hotkey handler). The intros
+  set SC_MOV_SPEED 2 for ~8 s fades. Whether the inventory crossfades is not known (no capture
+  found for it).
 
 ### Effects (from `scream.exe`, implemented in `src/effects.cpp`)
 
@@ -309,7 +316,6 @@ saves). Ghidra on `scream.exe` covers semantics the scripts don't reveal.
 
 - Original save game format (only matters if we want to load original saves).
 - Exactly when the two zoom sounds play (`0x416120`, `0x4160d0`).
-- `scOverlay`: which of the three strings is the image, and what the others do.
 - Playlist per-track repeat count and fade-time fields.
 - Whether `scTimerCreate` timers are cancelled on leaving the node (currently assumed).
 - Loading the 2006 release: its scripts are Lua 5.0 bytecode, which Lua 5.1 cannot load.

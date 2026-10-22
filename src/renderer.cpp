@@ -424,6 +424,21 @@ void Renderer::uploadInto(Texture& t, int w, int h, const uint8_t* rgba) {
     t.height = h;
 }
 
+void Renderer::captureFrame(Texture& t) {
+    if (!t.id) {
+        gl::GenTextures(1, &t.id);
+        gl::BindTexture(gl::TEXTURE_2D, t.id);
+        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR);
+        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR);
+        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE);
+        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE);
+    }
+    gl::BindTexture(gl::TEXTURE_2D, t.id);
+    gl::CopyTexImage2D(gl::TEXTURE_2D, 0, gl::RGBA8, 0, 0, width_, height_, 0);
+    t.width = width_;
+    t.height = height_;
+}
+
 void Renderer::release(Texture& t) {
     if (t.id)
         gl::DeleteTextures(1, &t.id);

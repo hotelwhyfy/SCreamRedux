@@ -516,7 +516,7 @@ const Entry kEntries[] = {
     FN(scOnEnter, S::Done, "runs after entering the room"),
     FN(scOnExit, S::Done, "stored; scream.exe never calls it either"),
     FN(scOnHover, S::Done, ""),
-    FN(scOverlay, S::Partial, "image = first string (roles of 2nd/3rd unknown)"),
+    FN(scOverlay, S::Done, "image, enter sound, leave sound (0x412a00)"),
     FN(scPlace, S::Done, "rects clipped to the face"),
     FN(scPlaylistClear, S::Done, ""),
     FN(scPlaylistFirst, S::Done, ""),
