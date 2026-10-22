@@ -95,6 +95,7 @@ int setEnabled(lua_State* L, bool on) {
     int key = argInt(L, 1);
     if (key == sc::OBJECT) {
         if (Object* o = E->world.bound.object) o->enabled = on;
+        else warn(on ? "scEnable" : "scDisable", "target not bound (fatal in scream.exe)");
         return 0;
     }
     if (on) E->flags.insert(key);

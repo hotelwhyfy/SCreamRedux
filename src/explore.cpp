@@ -16,7 +16,7 @@
 //
 //   scratch NAME...       globals that aren't progress (what's been dialed so
 //                         far); left out of the state so keypads aren't brute-forced
-//   once VIEW/OBJECT...   hotspots clicked at most once per game: script
+//   once VIEW/OBJECT...   hotspots clicked or used at most once per game: script
 //                         quirks a player wouldn't repeat (grabbing an item
 //                         the script lets you grab again)
 //   ROOM/VIEW: LUA        a solution, tried like a hotspot click when VIEW is
@@ -40,10 +40,11 @@
 #include "engine.hpp"
 
 struct Explorer {
-    // One step on the way somewhere: click `object` of `view` in `room`.
+    // One step on the way somewhere: click `object` of `view`, or use `item` on it.
     struct Step {
         View* view;
         Object* object;
+        Item* item = nullptr;
     };
     std::map<size_t, std::set<std::string>> tried;  // version -> action keys
     std::set<size_t> versions;
@@ -54,22 +55,24 @@ struct Explorer {
     std::string pendingKey;      // the action at the end of the path
     std::function<void()> pending;
     View* pendingView = nullptr; // where `pending` must run (null: anywhere)
-    // Scripted doors and stairs (SC_CUSTOM handlers that only move the player),
-    // learned by watching where an action leads when the state doesn't change.
+    // Scripted doors and stairs (SC_CUSTOM handlers that only move the player,
+    // on a click or an item used on the hotspot, like lighting the passage's
+    // candelabra), learned by watching where an action leads.
     struct Place { Room* room; View* view; };
-    std::map<Object*, Place> learned;
-    Object* watching = nullptr;  // last action's hotspot, if a click
+    using Door = std::pair<Object*, Item*>;  // item null: a click
+    std::map<Door, Place> learned;
+    Door watching{};             // last action's hotspot (and item)
     size_t watchVersion = 0;
     Place watchFrom{};
-    Object* stepped = nullptr;   // the learned door just taken on a path, if any
+    Door stepped{};              // the learned door just taken on a path, if any
     Place stepFrom{};            // where it was taken from
     Place here{};                // set by exploreStep before relearn()
     void relearn() {
-        if (stepped) {
+        if (stepped.first) {
             if (here.room == stepFrom.room && here.view == stepFrom.view) learned.erase(stepped);
             else learned[stepped] = here;
         }
-        stepped = nullptr;
+        stepped = {};
     }
     std::map<std::string, std::string> lastGlobals;  // for logging what changed between states
     std::set<std::string> lastLines;
@@ -83,6 +86,8 @@ struct Explorer {
     bool edgePending = false;     // an action ran; record where it led
     std::string forced;           // replay this action even though it was tried
     std::set<std::string> ever;   // every action done at least once, in any state
+    std::map<std::string, int> count;  // times each action was done, to report loops
+    std::set<std::string> doorKeys;    // actions that turned out to be scripted doors
     struct Hint { std::string room, view, code; };
     std::vector<Hint> hints;
     std::set<std::string> scratch;  // globals left out of the state
@@ -214,7 +219,8 @@ bool Engine::exploreStep() {
     if (!x.path.empty()) {
         Explorer::Step s = x.path.front();
         x.path.pop_front();
-        if (s.view != view() || !s.object->enabled) {
+        bool holding = !s.item || std::find(inventory.begin(), inventory.end(), s.item) != inventory.end();
+        if (s.view != view() || !s.object->enabled || !holding) {
             // Replan. A learned scripted door that now leads elsewhere is
             // updated; one that no longer moves the player is forgotten.
             x.relearn();
@@ -222,9 +228,13 @@ bool Engine::exploreStep() {
             x.pending = nullptr;
             return true;
         }
-        x.stepped = s.object->click.kind == sc::CUSTOM ? s.object : nullptr;
+        x.stepped = s.item || s.object->click.kind == sc::CUSTOM ? Explorer::Door{s.object, s.item} : Explorer::Door{};
         x.stepFrom = {room, view()};
-        activate(s.object);
+        if (s.item) {
+            held = s.item;
+            useHeldOn(s.object);
+        } else
+            activate(s.object);
         return true;
     }
     if (x.pending && x.pendingView && x.pendingView != view()) {
@@ -232,7 +242,7 @@ bool Engine::exploreStep() {
         x.pending = nullptr;
         return true;
     }
-    x.stepped = nullptr;
+    x.stepped = {};
     if (x.pending) {
         auto act = std::move(x.pending);
         x.pending = nullptr;
@@ -240,6 +250,10 @@ bool Engine::exploreStep() {
         x.watchVersion = x.version;
         x.edgePending = true;
         x.ever.insert(x.pendingKey);
+        // Doors are taken again in every state; anything else done this often is
+        // likely a script that keeps re-enabling it (e.g. an item that can be re-taken).
+        if (++x.count[x.pendingKey] == 1000 && !x.doorKeys.count(x.pendingKey))
+            std::printf("explore: looping? %s done 1000 times (a script that re-enables it?)\n", x.pendingKey.c_str());
         if (x.pendingKey == x.forced) x.forced.clear();
         x.watchFrom = {room, view()};
         ++x.actions;
@@ -259,10 +273,12 @@ bool Engine::exploreStep() {
     x.version = progressHash(serializeState(), x.scratch);
     if (x.edgePending && x.watchVersion != x.version) x.edges[x.watchVersion][x.lastAction] = x.version;
     x.edgePending = false;
-    if (x.watching) {
-        if (x.watchFrom.room != room || x.watchFrom.view != view())
+    if (x.watching.first) {
+        if (x.watchFrom.room != room || x.watchFrom.view != view()) {
             x.learned[x.watching] = {room, view()};
-        x.watching = nullptr;
+            x.doorKeys.insert(x.lastAction);
+        }
+        x.watching = {};
     }
     if (x.versions.insert(x.version).second) {
         std::printf("  state #%zu (%s/%s)", x.versions.size(), room ? room->name.c_str() : "?",
@@ -354,14 +370,21 @@ bool Engine::exploreStep() {
                 if (!x.onceDone.count(once))
                     offer(&cur, key, [this, o, once] {
                         if (explorer_->once.count(once)) explorer_->onceDone.insert(once);
-                        explorer_->watching = o;
+                        explorer_->watching = {o, nullptr};
                         activate(o);
                     });
             }
             for (auto& re : o->reactions) {
                 Item* it = world.items.count(re.item) ? world.items[re.item].get() : nullptr;
                 if (!it || std::find(inventory.begin(), inventory.end(), it) == inventory.end()) continue;
-                offer(&cur, keyOf(cur.room, cur.view, o, re.item), [this, o, it] { held = it; useHeldOn(o); });
+                std::string once = cur.view->name + "/" + o->name;
+                if (!x.onceDone.count(once))
+                    offer(&cur, keyOf(cur.room, cur.view, o, re.item), [this, o, it, once] {
+                        if (explorer_->once.count(once)) explorer_->onceDone.insert(once);
+                        explorer_->watching = {o, it};
+                        held = it;
+                        useHeldOn(o);
+                    });
             }
         }
         // Where we can go from here (only within reach of the current room's
@@ -383,9 +406,9 @@ bool Engine::exploreStep() {
                 to = stack.empty() ? cur.node : stack.back();
             } else if (o->click.kind == sc::ZOOMBACK && !cur.zooms.empty())
                 to = cur.node;
-            else if (o->click.kind == sc::CUSTOM && x.learned.count(o)) {
-                toRoom = x.learned[o].room;
-                to = x.learned[o].view;
+            else if (o->click.kind == sc::CUSTOM && x.learned.count({o, nullptr})) {
+                toRoom = x.learned[{o, nullptr}].room;
+                to = x.learned[{o, nullptr}].view;
                 if (to && to->isZoom) {  // a scripted zoom-in, presumably from here
                     stack = cur.zooms;
                     stack.push_back(to);
@@ -403,6 +426,29 @@ bool Engine::exploreStep() {
             Visit next{toRoom, to, cur.path, std::move(stack), toNode};
             next.path.push_back({cur.view, o});
             queue.push_back(std::move(next));
+        }
+        // Learned moves made by using an item on a hotspot.
+        for (auto& op : cur.view->objects) {
+            Object* o = op.get();
+            if (!o->enabled) continue;
+            for (auto& re : o->reactions) {
+                Item* it = world.items.count(re.item) ? world.items[re.item].get() : nullptr;
+                auto door = x.learned.find({o, it});
+                if (!it || door == x.learned.end() ||
+                    std::find(inventory.begin(), inventory.end(), it) == inventory.end())
+                    continue;
+                View* to = door->second.view;
+                if (!to || seen.count(to)) continue;
+                seen.insert(to);
+                std::vector<View*> stack;
+                if (to->isZoom) {
+                    stack = cur.zooms;
+                    stack.push_back(to);
+                }
+                Visit next{door->second.room, to, cur.path, std::move(stack), to->isZoom ? cur.node : to};
+                next.path.push_back({cur.view, o, it});
+                queue.push_back(std::move(next));
+            }
         }
     }
     // Item on item (inventory reactions) need no walking.

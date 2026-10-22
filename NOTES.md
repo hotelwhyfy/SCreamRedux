@@ -175,8 +175,17 @@ Verified against the shipped scripts and data while building the engine (`src/`)
   disabling itself; disabling both on the first grab makes `hose_quarry`, the shovel and the
   ending unreachable.
 - Each kind has its own slot (`0x49dd0c[kind]`; `0x402b40` only range-checks): binding a room,
-  node or zoom, by `scBind` or `scSwitch`, leaves the bound object alone. `grabTooth` relies on
-  it: `changeTime` (which binds nodes and the room) runs before its `scDisable(SC_OBJECT)`.
+  node or zoom, by `scBind` or `scSwitch`, leaves the other slots alone. `grabTooth` relies on
+  it (`changeTime`, which binds nodes and the room, runs before its `scDisable(SC_OBJECT)`), and
+  so does `putLetter` (`changeTime` ends with `scBind(SC_ROOM, aux)`, then
+  `scBind(SC_OBJECT, "inside_mailbox")` must still search the mailbox zoom).
+- A failed `scBind` binds index 0 (`0x4148a0` = find + bind of the result); using that slot is
+  fatal in scream.exe (`0x4036c0` "GetBind: target not bound" → `0x402340`: dump, message box,
+  exit). We clear the slot and log instead. The DC script has one such call: `enterStoreroom` in
+  phase 5 binds `dolhom_mask` (node n2) right after entering the room, so it only fails if the
+  storeroom is entered at n1.
+- Rooms remember the last node: switching to a node stores it in the room (`0x415bd2`,
+  `room+0xdd8`), and entering the room returns there. `scSetLastVisited` overrides it.
 - Nodes are found in the bound room, but zooms by name across all rooms, the first created
   winning — for `scBind(SC_ZOOM)` and `scSwitch(SC_ZOOM)` alike. Duplicate zoom names: `phone`
   / `phone-pick` (house-lobby and house-hall: the hall's version, with a clock hotspot, is
@@ -206,7 +215,8 @@ Verified against the shipped scripts and data while building the engine (`src/`)
   of `src/explore.cpp`.
 - Script quirks the main campaign has: relighting the passage candle sets `jerry_st` back to 17
   (calling Jerry again sets 18); turning the greenhouse faucet back on re-arms the glitter timer,
-  which re-enables the small key in the pond (each grab is another hour on the clock).
+  which re-enables the small key in the pond (each grab is another hour on the clock); digging
+  the grave again re-enables the tooth the same way (`dig`, `grabTooth`).
 
 ### Media
 

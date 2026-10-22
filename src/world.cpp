@@ -86,8 +86,7 @@ bool World::bind(int kind, const std::string& name) {
     switch (kind) {
     case sc::ROOM:
         if (Room* r = room(name)) {
-            bound.room = r;
-            bound.node = bound.zoom = bound.view = nullptr;
+            bound.room = r;  // the node and zoom slots keep their binding
             return true;
         }
         return false;
@@ -110,6 +109,9 @@ bool World::bind(int kind, const std::string& name) {
     case sc::OBJECT: {
         Scope scope = objectScope ? objectScope() : Scope::Build;
         View* v = scope == Scope::Node ? bound.node : scope == Scope::Zoom ? bound.zoom : scope == Scope::Build ? bound.view : nullptr;
+        // Not found binds nothing (0x4148a0 binds the search result, 0); using
+        // it then is scream.exe's fatal "GetBind: target not bound".
+        bound.object = nullptr;
         if (!v)
             return false;
         // The first object of that name in the view (0x403fd0 scans the global

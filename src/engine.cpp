@@ -142,10 +142,11 @@ bool Engine::switchRoom(const std::string& name) {
     overlay = nullptr;
     View* n = r->lastVisited.empty() ? nullptr : r->node(r->lastVisited);
     node = n ? n : r->nodes.front().get();
+    r->lastVisited = node->name;
     // scSwitch binds what it switches to (0x4158d0); a room then its node.
+    // Other kinds keep their binding (one slot per kind).
     world.bound.room = r;
     world.bound.node = world.bound.view = node;
-    world.bound.zoom = nullptr;
     // Timers created with scTimerCreate belong to the location they were made in.
     std::erase_if(timers_, [](const Timer& t) { return !t.global; });
     if (!r->onEnter.empty())
@@ -162,6 +163,9 @@ bool Engine::switchNode(const std::string& name) {
     }
     beginTransition();
     node = n;
+    // The room remembers it: re-entering the room comes back here, unless a
+    // script says otherwise with scSetLastVisited (0x415bd2: room+0xdd8 = node).
+    room->lastVisited = n->name;
     world.bound.room = room;
     world.bound.node = world.bound.view = n;
     zooms.clear();
