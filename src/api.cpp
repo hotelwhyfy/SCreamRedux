@@ -281,6 +281,7 @@ int scInventoryAdd(lua_State* L) {
 
 int scInventoryRemove(lua_State* L) {
     std::erase(E->inventory, E->world.bound.item);
+    if (E->held == E->world.bound.item) E->held = nullptr;
     return 0;
 }
 
@@ -288,8 +289,11 @@ int scInventoryRemove(lua_State* L) {
 
 int scJournalAdd(lua_State* L) { E->journal[argInt(L, 1)] = argStr(L, 2); return 0; }
 int scJournalClear(lua_State* L) { E->journal.clear(); return 0; }
-int scJournalSet(lua_State* L) { return 0; }
-int scJournalShow(lua_State* L) { return 0; }
+int scJournalSet(lua_State* L) {
+    E->journalConfig = {argStr(L, 1), argStr(L, 2), argStr(L, 3), argStr(L, 4), argStr(L, 5), E->world.bound.item};
+    return 0;
+}
+int scJournalShow(lua_State* L) { E->openJournal(); return 0; }
 
 int scHintsSet(lua_State* L) { E->hints[argInt(L, 1)] = argStr(L, 2); return 0; }
 int scHints(lua_State* L) { E->hintState = argInt(L, 1); return 0; }
@@ -464,17 +468,17 @@ const Entry kEntries[] = {
     FN(scFootstep, S::Done, "played when walking to the node"),
     FN(scGet, S::Partial, "location + stored settings"),
     FN(scGo, S::Done, "leaves wait mode"),
-    FN(scHints, S::Partial, "state stored"),
-    FN(scHintsSet, S::Partial, "stored"),
+    FN(scHints, S::Done, "inventory tutorial hints"),
+    FN(scHintsSet, S::Done, ""),
     FN(scInit, S::Done, ""),
     FN(scInventoryAdd, S::Done, ""),
-    FN(scInventoryReaction, S::Partial, "stored; needs inventory UI"),
+    FN(scInventoryReaction, S::Done, ""),
     FN(scInventoryRemove, S::Done, ""),
     FN(scInventorySet, S::Done, ""),
-    FN(scJournalAdd, S::Partial, "stored; needs journal UI"),
+    FN(scJournalAdd, S::Done, ""),
     FN(scJournalClear, S::Done, ""),
-    FN(scJournalSet, S::Stub, "needs journal UI"),
-    FN(scJournalShow, S::Stub, "needs journal UI"),
+    FN(scJournalSet, S::Done, "book opens from the bound item"),
+    FN(scJournalShow, S::Done, ""),
     FN(scLoadSettings, S::Done, "scream.cfg keys; display/audio keys recorded only"),
     FN(scLoadSubtitle, S::Partial, "name stored; needs .srt parsing"),
     FN(scLock, S::Done, "boolean, as in scream.exe"),
@@ -502,7 +506,7 @@ const Entry kEntries[] = {
     FN(scPlaylistQueue, S::Done, ""),
     FN(scPlaylistStart, S::Done, ""),
     FN(scPlaylistStop, S::Done, "per-track repeat/fade fields approximated"),
-    FN(scReaction, S::Partial, "stored; needs inventory UI"),
+    FN(scReaction, S::Done, ""),
     FN(scRun, S::Partial, "main loop; no menu yet"),
     FN(scScriptAdd, S::Done, ""),
     FN(scScriptGo, S::Done, ""),
@@ -554,7 +558,8 @@ int debugClick(lua_State* L) {
         warn("debugClick", "no enabled object " + name + " in current view");
         return 0;
     }
-    E->activate(o);
+    if (E->held) E->debugUseHeld(o);
+    else E->activate(o);
     return 0;
 }
 
@@ -569,6 +574,8 @@ void api::registerAll(Engine& engine) {
         lua_setfield(L, LUA_GLOBALSINDEX, kEntries[i].info.name);
     }
     lua_register(L, "debugClick", debugClick);
+    lua_register(L, "debugMouse", [](lua_State* L) { E->debugMouse(float(argNum(L, 1)), float(argNum(L, 2))); return 0; });
+    lua_register(L, "debugPress", [](lua_State* L) { E->debugPress(argInt(L, 1)); return 0; });
 }
 
 const api::Info* api::table(int& count) {

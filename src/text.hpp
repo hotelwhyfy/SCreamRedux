@@ -13,6 +13,10 @@
 
 class Resources;
 
+struct TextColor {
+    float r = 1, g = 1, b = 1;
+};
+
 class Font {
 public:
     bool load(Renderer& r, Resources& res, const std::string& name);
@@ -24,7 +28,8 @@ public:
 
     // Greedy word wrap to `maxWidth` canvas units.
     std::vector<std::string> wrap(const std::string& s, float maxWidth, float scale) const;
-    void draw(Renderer& r, const std::string& s, float x, float y, float scale, float alpha = 1) const;
+    void draw(Renderer& r, const std::string& s, float x, float y, float scale, float alpha = 1,
+              TextColor color = {}) const;
 
 private:
     static constexpr int kCell = 32, kGrid = 16;

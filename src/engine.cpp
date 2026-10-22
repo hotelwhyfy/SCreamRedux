@@ -320,6 +320,8 @@ Viewport Engine::nodeViewport() const {
 
 Object* Engine::hovered(int& edge) {
     edge = 0;
+    if (invOpen_ || journalOpen_)
+        return nullptr;
     int w, h;
     SDL_GetWindowSizeInPixels(window_, &w, &h);
     float scale = SDL_GetWindowPixelDensity(window_);
@@ -451,6 +453,14 @@ void Engine::click() {
         stopCutscene();  // click skips the cutscene
         return;
     }
+    if (journalOpen_) {
+        journalClick();
+        return;
+    }
+    if (invOpen_) {
+        inventoryClick();
+        return;
+    }
     if (choice_) {
         float x, y;
         canvasMouse(x, y);
@@ -463,10 +473,14 @@ void Engine::click() {
         }
         return;
     }
-    if (locked || script.busy())
+    if (locked || scriptBusy())
         return;
     int edge;
     Object* o = hovered(edge);
+    if (o && held) {
+        useHeldOn(o);
+        return;
+    }
     if (!o || o->click.empty())
         return;
     activate(o);
@@ -477,6 +491,20 @@ void Engine::activate(Object* o) {
         SDL_Log("[click] %s/%s/%s", room ? room->name.c_str() : "", view()->name.c_str(), o->name.c_str());
     world.bindClicked(room, view(), o);
     perform(o->click);
+}
+
+void Engine::debugMouse(float x, float y) {
+    int w, h;
+    SDL_GetWindowSizeInPixels(window_, &w, &h);
+    Canvas c = Canvas::fit(w, h);
+    float density = SDL_GetWindowPixelDensity(window_);
+    mouseX_ = (c.x + x * c.scale) / density;
+    mouseY_ = (c.y + y * c.scale) / density;
+}
+
+void Engine::debugPress(int button) {
+    if (button == 1) click();
+    else if (button == 2) rightClick();
 }
 
 Object* Engine::findInView(const std::string& name) {
@@ -503,7 +531,7 @@ void Engine::handleEvent(const SDL_Event& e) {
     case SDL_EVENT_MOUSE_MOTION:
         mouseX_ = e.motion.x;
         mouseY_ = e.motion.y;
-        // Right-drag look is an addition of this port; it obeys the same gates as edge panning.
+        // Middle-drag look is an addition of this port; it obeys the same gates as edge panning.
         if (dragging_ && motion && !locked && !camAnim_.active && !(view() && view()->isZoom)) {
             cam.yaw = wrap180(cam.yaw - e.motion.xrel * 0.25f);
             const float limit = std::atan(kPitchLimit) * 180.0f / 3.14159265f;
@@ -512,10 +540,11 @@ void Engine::handleEvent(const SDL_Event& e) {
         break;
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
         if (e.button.button == SDL_BUTTON_LEFT) click();
-        else if (e.button.button == SDL_BUTTON_RIGHT) dragging_ = true;
+        else if (e.button.button == SDL_BUTTON_RIGHT) rightClick();
+        else if (e.button.button == SDL_BUTTON_MIDDLE) dragging_ = true;
         break;
     case SDL_EVENT_MOUSE_BUTTON_UP:
-        if (e.button.button == SDL_BUTTON_RIGHT) dragging_ = false;
+        if (e.button.button == SDL_BUTTON_MIDDLE) dragging_ = false;
         break;
     }
 }
@@ -562,7 +591,8 @@ void Engine::update(double dt) {
             camAnim_.active = false;
             cam.yaw = wrap180(cam.yaw);
         }
-    } else if (motion && !locked && !script.busy() && view() && !view()->isZoom && !dragging_ && !aborted_) {
+    } else if (motion && !locked && !scriptBusy() && view() && !view()->isZoom && !dragging_ && !aborted_ &&
+               !invOpen_ && !journalOpen_) {
         panCamera(dt);
     } else {
         panRamp_ = 0;
@@ -596,8 +626,12 @@ void Engine::update(double dt) {
 void Engine::drawCursor(Object* hover, int edge) {
     int kind;
     if (aborted_ || (locked && !waitMode)) return;
-    if (choice_) kind = sc::NORMAL;
-    else if (locked || script.busy()) kind = sc::WAIT;
+    if (held && !locked) {
+        drawHeldCursor();
+        return;
+    }
+    if (choice_ || invOpen_ || journalOpen_) kind = sc::NORMAL;
+    else if (locked || scriptBusy()) kind = sc::WAIT;
     else if (hover) kind = hover->cursor;
     else if (edge && motion) kind = edge;  // SC_LEFT..SC_DOWN double as the pan cursors
     else kind = sc::NORMAL;
@@ -630,6 +664,13 @@ void Engine::render() {
         return;
     }
     View* v = view();
+    if (journalOpen_) {
+        drawJournal();
+        drawCursor(nullptr, 0);
+        return;
+    }
+    if (invOpen_)
+        renderer.setTint(0.9f, 0.75f, 0.5f);  // the inventory's sepia backdrop (0x409680)
     if (v && !v->isZoom) {
         for (const auto& f : v->faces)
             renderer.texture(res, f);
@@ -653,7 +694,11 @@ void Engine::render() {
         if (auto* t = renderer.texture(res, overlay->args[0]))
             renderer.drawImage(*t, 0, kBar, sc::SCREEN_W, sc::SCREEN_H - 2 * kBar);
 
+    renderer.setTint(1, 1, 1);
+
     ensureFont();
+    if (invOpen_)
+        drawInventory();
     if (font_.loaded()) {
         if (choice_) drawChoice();
         else if (!feedback_.empty()) drawFeedback();

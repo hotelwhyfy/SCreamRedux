@@ -61,8 +61,10 @@ public:
     void drawImage(const Texture& t, float x, float y, float w, float h, float alpha = 1);
     // Draw the (u0,v0)-(u1,v1) part of a texture.
     void drawImageUV(const Texture& t, float x, float y, float w, float h, float u0, float v0, float u1, float v1,
-                     float alpha = 1);
+                     float alpha = 1, float r = 1, float g = 1, float b = 1);
     void drawRect(float x, float y, float w, float h, float r, float g, float b, float a);
+    // Colour multiplied into drawNode / drawImage (e.g. the inventory's sepia backdrop).
+    void setTint(float r, float g, float b) { tint_ = {r, g, b}; }
 
     const Texture* texture(Resources& res, const std::string& name);
     // Upload an already-decoded image under `name` (e.g. fonts, which need the pixels too).
@@ -82,6 +84,7 @@ private:
     gl::GLuint program_ = 0, vao_ = 0, vbo_ = 0;
     gl::GLint uMvp_ = -1, uTint_ = -1, uTex_ = -1;
     gl::GLuint white_ = 0;
+    std::array<float, 3> tint_{1, 1, 1};
     int width_ = 0, height_ = 0;
     Canvas canvas_;
     std::unordered_map<std::string, Texture> textures_;

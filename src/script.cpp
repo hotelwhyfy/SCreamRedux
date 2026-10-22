@@ -101,6 +101,10 @@ void ScriptHost::resume(Thread& t) {
     }
 }
 
+bool ScriptHost::busyExcept(const std::string& name) const {
+    return std::any_of(threads_.begin(), threads_.end(), [&](const Thread& t) { return t.name != name; });
+}
+
 void ScriptHost::update() {
     // Snapshot: resuming may start new handlers or finish existing ones.
     std::vector<lua_State*> ready;

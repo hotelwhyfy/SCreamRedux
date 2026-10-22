@@ -44,6 +44,8 @@ public:
     void update();
 
     bool busy() const { return !threads_.empty(); }
+    // Busy with anything other than the named handler (the --exec test driver).
+    bool busyExcept(const std::string& name) const;
     bool isMain(lua_State* L) const { return L == L_; }
 
 private:

@@ -63,7 +63,16 @@ public:
     std::map<int, std::string> hints;  // scHintsSet
     int hintState = 0;                 // scHints
     std::vector<Item*> inventory;
-    std::map<int, std::string> journal;
+    Item* held = nullptr;              // item picked up from the inventory (used as the cursor)
+    std::map<int, std::string> journal;  // scJournalAdd: entry index -> text
+
+    // scJournalSet, called while the journal item is bound: the book opens from that item.
+    struct JournalConfig {
+        std::string image, font, openSound, turnSound, closeSound;
+        Item* item = nullptr;
+    } journalConfig;
+    void openJournal();  // also scJournalShow
+    void closeJournal();
     std::string subtitles;
     std::map<int, std::pair<int, int>> ambience;  // scSetAmbience: key -> (preset, flag)
 
@@ -107,6 +116,10 @@ public:
     void activate(Object* o);
     // Find an enabled object by name in the current view (for debugClick).
     Object* findInView(const std::string& name);
+    // Debug input for --exec: move the pointer (canvas units) and press a button.
+    void debugMouse(float x, float y);
+    void debugPress(int button);
+    void debugUseHeld(Object* o) { useHeldOn(o); }
     void addTimer(double seconds, const std::string& fn, bool global);
 
     // Engine flags, as in scream.exe:
@@ -123,7 +136,30 @@ private:
     void update(double dt);
     void render();
     void click();
-    Object* hovered(int& edge);
+    void rightClick();
+    // A game handler is running (input waits). The --exec driver doesn't count.
+    bool scriptBusy() const { return script.busyExcept("__exec"); }
+
+    // Inventory and journal screens (ui.cpp).
+    bool invOpen_ = false;
+    bool journalOpen_ = false;
+    size_t journalSpread_ = 0;
+    std::vector<std::vector<std::string>> journalPages_;  // wrapped lines per page
+    Font journalFont_;
+    struct Box { float x, y, w, h; };
+    bool canOpenInventory() const;
+    void openInventory();
+    void closeInventory();
+    bool hintsActive() const;
+    Box slotBox(int slot) const;
+    int slotAt(float x, float y) const;
+    void inventoryClick();
+    void useHeldOn(Object* o);
+    void drawInventory();
+    void layoutJournal();
+    void journalClick();
+    void drawJournal();
+    void drawHeldCursor();    Object* hovered(int& edge);
     Viewport nodeViewport() const;
     void panCamera(double dt);
     void drawCursor(Object* hover, int edge);

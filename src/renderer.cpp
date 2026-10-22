@@ -218,7 +218,7 @@ void Renderer::setViewport3D(const Viewport& vp, const Camera& cam) {
 
 void Renderer::drawNode(const View& node, const Camera& cam, const Viewport& vp) {
     setViewport3D(vp, cam);
-    gl::Uniform4f(uTint_, 1, 1, 1, 1);
+    gl::Uniform4f(uTint_, tint_[0], tint_[1], tint_[2], 1);
     gl::Disable(gl::BLEND);
     // The decoder hands back rows top-first, so v = 0 is the top of the image.
     for (int f = sc::FRONT; f <= sc::DOWN; ++f) {
@@ -234,7 +234,7 @@ void Renderer::drawNode(const View& node, const Camera& cam, const Viewport& vp)
         if (it == textures_.end())
             gl::Uniform4f(uTint_, 0.15f, 0.0f, 0.15f, 1);  // missing texture: dark magenta
         gl::DrawArrays(gl::TRIANGLE_STRIP, 0, 4);
-        gl::Uniform4f(uTint_, 1, 1, 1, 1);
+        gl::Uniform4f(uTint_, tint_[0], tint_[1], tint_[2], 1);
     }
     gl::Viewport(0, 0, width_, height_);
 }
@@ -283,14 +283,14 @@ void Renderer::quad2D(float x, float y, float w, float h, float u0, float v0, fl
 
 void Renderer::drawImage(const Texture& t, float x, float y, float w, float h, float alpha) {
     gl::BindTexture(gl::TEXTURE_2D, t.id);
-    gl::Uniform4f(uTint_, 1, 1, 1, alpha);
+    gl::Uniform4f(uTint_, tint_[0], tint_[1], tint_[2], alpha);
     quad2D(x, y, w, h);
 }
 
 void Renderer::drawImageUV(const Texture& t, float x, float y, float w, float h, float u0, float v0, float u1, float v1,
-                           float alpha) {
+                           float alpha, float r, float g, float b) {
     gl::BindTexture(gl::TEXTURE_2D, t.id);
-    gl::Uniform4f(uTint_, 1, 1, 1, alpha);
+    gl::Uniform4f(uTint_, r, g, b, alpha);
     quad2D(x, y, w, h, u0, v0, u1, v1);
 }
 

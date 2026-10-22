@@ -63,13 +63,14 @@ std::vector<std::string> Font::wrap(const std::string& s, float maxWidth, float 
     return lines;
 }
 
-void Font::draw(Renderer& r, const std::string& s, float x, float y, float scale, float alpha) const {
+void Font::draw(Renderer& r, const std::string& s, float x, float y, float scale, float alpha, TextColor color) const {
     const float inv = 1.0f / (kCell * kGrid);
     for (unsigned char c : s) {
         const Glyph& g = glyphs_[c];
         if (g.width > 0) {
             float u0 = float((c % kGrid) * kCell + g.left) * inv, v0 = float((c / kGrid) * kCell) * inv;
-            r.drawImageUV(texture_, x, y, g.width * scale, kCell * scale, u0, v0, u0 + g.width * inv, v0 + kCell * inv, alpha);
+            r.drawImageUV(texture_, x, y, g.width * scale, kCell * scale, u0, v0, u0 + g.width * inv, v0 + kCell * inv, alpha,
+                          color.r, color.g, color.b);
         }
         x += float(g.width + kTracking) * scale;
     }
