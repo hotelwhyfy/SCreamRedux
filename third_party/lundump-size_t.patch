@@ -1,0 +1,61 @@
+--- lundump.c.orig	2026-10-22 05:42:36
++++ lundump.c	2026-10-22 05:42:36
+@@ -25,6 +25,7 @@
+  ZIO* Z;
+  Mbuffer* b;
+  const char* name;
++ int sizesize_t;	/* SCREAM: size_t width declared by the chunk header */
+ } LoadState;
+ 
+ #ifdef LUAC_TRUST_BINARIES
+@@ -73,10 +74,28 @@
+  return x;
+ }
+ 
++/* SCREAM: read a size_t of the width the chunk was compiled with, so 32-bit
++** chunks (the original game scripts) load on 64-bit hosts. Little-endian only. */
++static size_t LoadSize(LoadState* S)
++{
++ if (S->sizesize_t==4)
++ {
++  unsigned int x;
++  LoadMem(S,&x,1,4);
++  return (size_t)x;
++ }
++ else
++ {
++  unsigned long long x;
++  LoadMem(S,&x,1,8);
++  IF ((size_t)x!=x, "size_t too large");
++  return (size_t)x;
++ }
++}
++
+ static TString* LoadString(LoadState* S)
+ {
+- size_t size;
+- LoadVar(S,size);
++ size_t size=LoadSize(S);
+  if (size==0)
+   return NULL;
+  else
+@@ -180,12 +199,19 @@
+  return f;
+ }
+ 
++/* index of the sizeof(size_t) byte in the header (see luaU_header) */
++#define SIZET_OFFSET	(sizeof(LUA_SIGNATURE)-1+4)
++
+ static void LoadHeader(LoadState* S)
+ {
+  char h[LUAC_HEADERSIZE];
+  char s[LUAC_HEADERSIZE];
+  luaU_header(h);
+  LoadBlock(S,s,LUAC_HEADERSIZE);
++ /* SCREAM: accept either size_t width; everything else must match */
++ S->sizesize_t=s[SIZET_OFFSET];
++ IF (S->sizesize_t!=4 && S->sizesize_t!=8, "bad header");
++ s[SIZET_OFFSET]=h[SIZET_OFFSET];
+  IF (memcmp(h,s,LUAC_HEADERSIZE)!=0, "bad header");
+ }
+ 

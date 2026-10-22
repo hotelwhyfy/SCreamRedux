@@ -1,0 +1,10 @@
+# Original game data (copyrighted; never commit)
+*.iso
+*.exe
+extracted/
+__pycache__/
+tools/vendor/
+build/
+compile_commands.json
+/*.png
+.cache/
