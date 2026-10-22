@@ -102,6 +102,7 @@ void Sound::playChannel(int channel, const std::string& file, bool loop) {
     stopChannel(channel);
     auto vol = channelVolume_.find(channel);
     channels_[channel] = start(file, loop, vol == channelVolume_.end() ? 1 : vol->second);
+    channelFiles_[channel] = {file, loop};
 }
 
 bool Sound::channelPlaying(int channel) const {
@@ -137,6 +138,43 @@ void Sound::stopChannel(int channel) {
         audio_.stop(it->second);
         channels_.erase(it);
     }
+}
+
+std::vector<Sound::Loop> Sound::loopingChannels() const {
+    std::vector<Loop> out;
+    for (const auto& [ch, h] : channels_) {
+        auto f = channelFiles_.find(ch);
+        if (f != channelFiles_.end() && f->second.second && audio_.playing(h))
+            out.push_back({ch, f->second.first, audio_.gain(h)});
+    }
+    return out;
+}
+
+std::string Sound::currentTrack() const { return audio_.playing(music_) ? musicName_ : std::string(); }
+
+void Sound::stopAll() {
+    audio_.stopAll();
+    channels_.clear();
+    channelFiles_.clear();
+    channelVolume_.clear();
+    music_ = menuMusic_ = 0;
+    musicName_.clear();
+    playlist_.clear();
+    playlistIndex_ = playlistAudible_ = 0;
+    playlistPlaying_ = false;
+}
+
+void Sound::pauseGame(bool paused) { audio_.pauseAll(paused, menuMusic_); }
+
+void Sound::playMenuMusic(const std::string& file) {
+    if (audio_.playing(menuMusic_))
+        return;
+    menuMusic_ = start(file, true, 0.8f);
+}
+
+void Sound::stopMenuMusic() {
+    audio_.fade(menuMusic_, 0, 1.0, true);
+    menuMusic_ = 0;
 }
 
 void Sound::playVoice(const std::string& file) { playChannel(sc::DIALOGUE, file, false); }

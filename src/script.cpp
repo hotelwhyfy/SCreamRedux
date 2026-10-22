@@ -101,6 +101,16 @@ void ScriptHost::resume(Thread& t) {
     }
 }
 
+void ScriptHost::cancelAll() {
+    // The --exec test driver survives, so a test can keep going after a load.
+    std::erase_if(threads_, [&](const Thread& t) {
+        if (t.name == "__exec")
+            return false;
+        luaL_unref(L_, LUA_REGISTRYINDEX, t.ref);
+        return true;
+    });
+}
+
 bool ScriptHost::busyExcept(const std::string& name) const {
     return std::any_of(threads_.begin(), threads_.end(), [&](const Thread& t) { return t.name != name; });
 }

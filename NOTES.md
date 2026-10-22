@@ -199,6 +199,28 @@ ECX), so Ghidra's decompiler hides arguments; read the disassembly alongside. Sc
 - `scLoadSettings(file)` (`0x40f4a0`): scream.cfg keys SCRIPT, RESOURCE, WIDTH, HEIGHT, DEPTH,
   QUALITY, FULLSCREEN, SURROUND, VSYNC, AUDIO_DEVICE, BUFFER_SIZE, NUM_BUFFERS, DEBUG, LANGUAGE.
 
+### Inventory, journal, menu (from the scripts and `scream.exe`)
+
+- Controls come from the tutorial hints (`msg01110`–`msg01117`): right-click opens/closes the
+  inventory, left-click grabs an item, a held item is used with a left-click on an object
+  (`scReaction`) or on another item (the target's `scInventoryReaction`, keyed by the held item).
+- `scInventorySet(icon, label, failText, failVoice)`: the last two play when a held item is
+  used where it has no reaction ("That doesn't work.", the magnifying glass's "Not much to see
+  here...").
+- Inventory draw (`0x409680`): the frozen view tinted (0.9, 0.75, 0.5), icons of `SC_INV_SIZE`
+  in rows of 10, in a 1024-wide virtual space.
+- Hints: with `scHints(SC_HINTS_ACTIVE)` and SC_HINTS on, opening shows `HINTS_OPEN`, grabbing
+  the `HINTS_ITEM` item shows `HINTS_GRAB`, closing with it held shows `HINTS_CLOSE`.
+- `scJournalSet(image, font, open, turn, close)` attaches the journal to the bound item; the
+  book shows `scJournalAdd` entries in index order.
+- Menu strings in the exe: "Which game do you want to play?", "Scratches: Director's Cut",
+  "Scratches: The Last Visit", "Start a new game?", "Load a saved game?", "Replace saved
+  game?", "Quit the game?", "Game loaded/saved", "Could not load/save game!"; setup items
+  hints, surround music, camera speed (SLOW/NORMAL/FAST), text speed, gamma correction,
+  quality (LOW/MEDIUM/HIGH), slideshow mode, alternate control. Menu layout is not recovered.
+- Saves are this port's own format (`src/save.cpp`): script globals as a diff against the
+  start-of-game baseline, plus world/engine state. A new game restores that baseline.
+
 ## Porting strategy
 
 Embed Lua 5.1 and run the original `scream.sc` + `scratches.sc` unmodified; reimplement the

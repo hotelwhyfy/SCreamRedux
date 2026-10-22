@@ -34,6 +34,10 @@ public:
     // Ramp gain to `target` over `seconds`; optionally stop when it gets there.
     void fade(Handle h, float target, double seconds, bool stopAtEnd = false);
 
+    // Pause or resume every voice except `keep` (used behind the menu).
+    void pauseAll(bool paused, Handle keep = 0);
+    void stopAll();
+
     // Advance fades and drop finished voices. Call once per frame.
     void update(double dt);
 

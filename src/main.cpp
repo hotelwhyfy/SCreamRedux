@@ -24,7 +24,7 @@ void usage() {
         "  --data DIR        directory with scream.sc, scratches.sc, *.res (repeatable;\n"
         "                    later directories override earlier ones)\n"
         "  --script NAME     game script to run (default scratches.sc)\n"
-        "  --game sdc|tlv    which new-game callback to start (default sdc)\n"
+        "  --game sdc|tlv    skip the intro and menu and start that game\n"
         "  --start ROOM[:NODE]  skip the game intro and start at a location\n"
         "  --yaw DEG --pitch DEG  initial view direction\n"
         "  --screenshot FILE write a PNG once the scene settles, then quit\n"

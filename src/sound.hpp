@@ -51,12 +51,29 @@ public:
     void playlistFirst();
     void playlistLast();
 
+    // For saved games: looping effect channels and the current music track.
+    struct Loop {
+        int channel;
+        std::string file;
+        float volume;
+    };
+    std::vector<Loop> loopingChannels() const;
+    std::string currentTrack() const;
+    void stopAll();
+
+    // The menu pauses game audio and plays its own music.
+    void pauseGame(bool paused);
+    void playMenuMusic(const std::string& file);
+    void stopMenuMusic();
+
 private:
     Audio::Handle start(const std::string& file, bool loop, float gain);
 
     Resources& res_;
     Audio audio_;
     std::map<int, Audio::Handle> channels_;
+    std::map<int, std::pair<std::string, bool>> channelFiles_;  // channel -> (file, loop)
+    Audio::Handle menuMusic_ = 0;
     std::map<int, float> channelVolume_;  // 0..1, from scFXSet(SC_VOLUME)
 
     Audio::Handle music_ = 0;

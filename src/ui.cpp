@@ -55,7 +55,7 @@ void Engine::closeInventory() {
 }
 
 void Engine::rightClick() {
-    if (aborted_ || video_)
+    if (aborted_ || video_ || menuOpen())
         return;
     if (journalOpen_) {
         closeJournal();

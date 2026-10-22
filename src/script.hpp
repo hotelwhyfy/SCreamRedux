@@ -42,6 +42,8 @@ public:
 
     // Resume every coroutine whose wait is over.
     void update();
+    // Abandon every running handler (loading a game, starting a new one).
+    void cancelAll();
 
     bool busy() const { return !threads_.empty(); }
     // Busy with anything other than the named handler (the --exec test driver).

@@ -152,6 +152,17 @@ void Audio::fade(Handle h, float target, double seconds, bool stopAtEnd) {
     v.stopAtEnd = stopAtEnd;
 }
 
+void Audio::pauseAll(bool paused, Handle keep) {
+    for (auto& [h, v] : voices_) {
+        if (h == keep)
+            continue;
+        if (paused) SDL_UnbindAudioStream(v->stream);
+        else SDL_BindAudioStream(device_, v->stream);
+    }
+}
+
+void Audio::stopAll() { voices_.clear(); }
+
 void Audio::update(double dt) {
     for (auto it = voices_.begin(); it != voices_.end();) {
         Voice& v = *it->second;

@@ -60,7 +60,7 @@ Engine::~Engine() {
         SDL_DestroyWindow(window_);
 }
 
-double Engine::now() const { return double(SDL_GetTicksNS()) / 1e9; }
+double Engine::realTime() const { return double(SDL_GetTicksNS()) / 1e9; }
 
 std::filesystem::path Engine::findData(const std::string& name) const {
     for (auto it = opts.dataDirs.rbegin(); it != opts.dataDirs.rend(); ++it)
@@ -221,10 +221,16 @@ bool Engine::loadSettings(const std::string& file) {
 }
 
 void Engine::abortGame() {
-    // scream.exe stops the playlist, waits for a key or click, then returns to
-    // the main menu. Without a menu yet, the game ends there.
+    // scream.exe stops the playlist, waits for a key or click, then returns to the main menu.
     sound.playlistStop(-1);
     aborted_ = true;
+}
+
+void Engine::leaveAbortedGame() {
+    aborted_ = false;
+    gameRunning_ = false;
+    restoreState(baseline_);
+    openMenu();
 }
 
 void Engine::playZoomAudio(const View* zoom, int when) {
@@ -445,8 +451,12 @@ void Engine::drawFeedback() {
 }
 
 void Engine::click() {
+    if (menuOpen()) {
+        menuClick();
+        return;
+    }
     if (aborted_) {
-        quit_ = true;
+        leaveAbortedGame();
         return;
     }
     if (video_) {
@@ -520,11 +530,13 @@ void Engine::handleEvent(const SDL_Event& e) {
     case SDL_EVENT_QUIT: quit_ = true; break;
     case SDL_EVENT_KEY_DOWN:
         if (aborted_)
-            quit_ = true;
+            leaveAbortedGame();
+        else if (menuOpen() && e.key.key == SDLK_ESCAPE)
+            menuBack();
         else if (video_ && (e.key.key == SDLK_ESCAPE || e.key.key == SDLK_SPACE))
             stopCutscene();
-        else if (e.key.key == SDLK_ESCAPE)
-            quit_ = true;
+        else if (e.key.key == SDLK_ESCAPE && gameRunning_ && !scriptBusy())
+            openMenu();
         else if (e.key.key == SDLK_F12)
             SDL_Log("screenshot: %s", renderer.capture("scream-screenshot.png").c_str());
         break;
@@ -581,6 +593,10 @@ void Engine::panCamera(double dt) {
 }
 
 void Engine::update(double dt) {
+    if (menuOpen()) {
+        sound.update(dt);  // menu music only; the game is paused
+        return;
+    }
     double t = now();
     if (camAnim_.active) {
         double k = std::min(1.0, (t - camAnim_.t0) / camAnim_.duration);
@@ -625,12 +641,12 @@ void Engine::update(double dt) {
 // mode is on (scWait), in which case the wait cursor shows.
 void Engine::drawCursor(Object* hover, int edge) {
     int kind;
-    if (aborted_ || (locked && !waitMode)) return;
-    if (held && !locked) {
+    if (aborted_ || (locked && !waitMode && !menuOpen())) return;
+    if (held && !locked && !menuOpen()) {
         drawHeldCursor();
         return;
     }
-    if (choice_ || invOpen_ || journalOpen_) kind = sc::NORMAL;
+    if (choice_ || invOpen_ || journalOpen_ || menuOpen()) kind = sc::NORMAL;
     else if (locked || scriptBusy()) kind = sc::WAIT;
     else if (hover) kind = hover->cursor;
     else if (edge && motion) kind = edge;  // SC_LEFT..SC_DOWN double as the pan cursors
@@ -653,6 +669,11 @@ void Engine::render() {
     renderer.beginFrame(w, h);
     if (aborted_)
         return;
+    if (menuOpen()) {
+        drawMenu();
+        drawCursor(nullptr, 0);
+        return;
+    }
     if (video_) {
         // Videos share the zoom frame: full canvas width at their own aspect.
         float vh = sc::SCREEN_W * float(video_->height()) / float(video_->width());
@@ -717,22 +738,26 @@ void Engine::render() {
 void Engine::run() {
     if (!init())
         return;
+    // The script has built the world: this is the state every new game starts from.
+    captureBaseline();
+    loadUserSettings();
 
-    // No menu yet: start the requested game directly, or jump to a location.
     if (!opts.start.empty()) {
+        // Debug: jump straight to a location.
         auto colon = opts.start.find(':');
-        switchRoom(opts.start.substr(0, colon));
+        gameRunning_ = switchRoom(opts.start.substr(0, colon));
         if (colon != std::string::npos)
             switchNode(opts.start.substr(colon + 1));
+    } else if (!opts.game.empty()) {
+        startNewGame(opts.game == "tlv" ? 1 : 0);
     } else {
-        size_t idx = opts.game == "tlv" ? 1 : 0;
-        if (idx < menu.newGame.size())
-            script.start(menu.newGame[idx]);
-        else
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "script registered no new-game callback");
+        // As the original: the intro handler (logo videos), then the main menu.
+        if (auto it = menu.extra.find(sc::INTRO); it != menu.extra.end())
+            script.start(it->second);
+        menuPending_ = true;
     }
 
-    double last = now();
+    double last = realTime();
     const double started = last;
     int settledFrames = 0;
     bool execPending = !opts.exec.empty();
@@ -740,9 +765,28 @@ void Engine::run() {
         SDL_Event e;
         while (SDL_PollEvent(&e))
             handleEvent(e);
-        double t = now();
-        update(t - last);
+        if (deferred_) {
+            auto action = std::move(deferred_);
+            deferred_ = nullptr;
+            action();
+        }
+        double t = realTime();
+        double dt = t - last;
         last = t;
+        if (!menuOpen())
+            gameClock_ += dt;
+        update(dt);
+
+        if (menuPending_ && !script.busy()) {
+            menuPending_ = false;
+            openMenu();
+        }
+        if (quitWhenIdle_ && !script.busy())
+            quit_ = true;
+        if (menu_ == Screen::Message && t > messageUntil_) {
+            if (afterMessage_ == Screen::None) closeMenu();
+            else menu_ = afterMessage_;
+        }
         if (execPending && !script.busy()) {
             execPending = false;
             script.startCode(opts.exec, "exec");
@@ -755,10 +799,12 @@ void Engine::run() {
                 quit_ = true;
             }
         } else if (!opts.screenshot.empty() && !execPending) {
-            settledFrames = script.busy() || camAnim_.active ? 0 : settledFrames + 1;
+            settledFrames = script.busy() || camAnim_.active || menuPending_ ? 0 : settledFrames + 1;
             if (settledFrames == 5) {
-                cam.yaw = opts.yaw;
-                cam.pitch = opts.pitch;
+                if (!menuOpen()) {
+                    cam.yaw = opts.yaw;
+                    cam.pitch = opts.pitch;
+                }
                 render();
                 SDL_Log("screenshot: %s", renderer.capture(opts.screenshot.c_str()).c_str());
                 quit_ = true;

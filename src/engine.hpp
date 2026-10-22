@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <set>
 #include <string>
@@ -21,7 +22,7 @@
 struct Options {
     std::vector<std::filesystem::path> dataDirs;  // searched in order; later ones win
     std::string start;          // "room" or "room:node": skip the menu and go there
-    std::string game = "sdc";   // which new-game callback to run without a menu: sdc | tlv
+    std::string game;           // sdc | tlv: skip the menu and start that game
     std::string screenshot;     // write a PNG once the scene settles, then quit
     double screenshotAt = -1;   // ...or after this many seconds, settled or not
     std::string exec;           // Lua to run as a handler once startup is idle (testing)
@@ -58,6 +59,7 @@ public:
         std::vector<std::string> newGame;     // callbacks, one per selectable game
         std::map<int, std::string> extra;     // scMenuSetEx
         bool saveFunc = false;
+        std::string font;
     } menu;
 
     std::map<int, std::string> hints;  // scHintsSet
@@ -127,8 +129,19 @@ public:
     bool waitMode = false;  // scWait/scGo (0x48bc10): show the wait cursor while locked
     bool motion = true;     // scMotion/scStill (0x48bc08): camera input allowed
     void abortGame();       // scAbort: wait for input after the ending, then leave
+    void leaveAbortedGame();
     bool loadSettings(const std::string& file);  // scLoadSettings / scream.cfg
-    double now() const;
+    double now() const { return gameClock_; }  // game time; stops while the menu is open
+    double realTime() const;
+
+    struct LuaValue {
+        char type;  // 'n' number, 'b' boolean, 's' string
+        double number;
+        std::string text;
+    };
+
+    // Main menu (menu.cpp); also scMenuShow.
+    void openMenu();
 
 private:
     void mountResources();
@@ -137,6 +150,50 @@ private:
     void render();
     void click();
     void rightClick();
+
+    // Saved games (save.cpp).
+    std::map<std::string, LuaValue> luaGlobals();
+    void setLuaGlobal(const std::string& name, const LuaValue* v);
+    std::string serializeState();
+    bool restoreState(const std::string& data);
+    void captureBaseline();
+    std::filesystem::path saveDir() const;
+    std::filesystem::path slotPath(int slot) const;
+    std::string slotDescription(int slot) const;
+    bool saveSlot(int slot);
+    bool loadSlot(int slot);
+    std::string baseline_;  // world + engine state when the game script finished building
+    std::map<std::string, LuaValue> luaBaseline_;
+    int currentGame_ = -1;
+    bool gameRunning_ = false;
+    double gameClock_ = 0;
+
+    // Main menu (menu.cpp).
+    enum class Screen { None, Main, ChooseGame, Confirm, Setup, Load, Save, Message };
+    Screen menu_ = Screen::None;
+    Screen afterMessage_ = Screen::None;
+    std::string prompt_;
+    std::function<void()> onYes_;
+    double messageUntil_ = 0;
+    bool menuPending_ = false;   // open the menu once the intro handler finishes
+    std::function<void()> deferred_;  // state-replacing menu actions run between frames
+    bool quitWhenIdle_ = false;  // quitting: let the outro handler finish first
+    Font menuFont_;
+    bool menuOpen() const { return menu_ != Screen::None; }
+    void closeMenu();
+    void showMessage(const std::string& text, Screen after);
+    void confirm(const std::string& question, std::function<void()> yes);
+    void startNewGame(int index);
+    void quitGame();
+    void menuClick();
+    void menuBack();
+    void drawMenu();
+    std::vector<std::string> menuButtons() const;
+    std::vector<std::string> menuLines() const;
+    int menuLineAt(float x, float y) const;
+    int menuButtonAt(float x, float y) const;
+    void loadUserSettings();
+    void saveUserSettings();
     // A game handler is running (input waits). The --exec driver doesn't count.
     bool scriptBusy() const { return script.busyExcept("__exec"); }
 

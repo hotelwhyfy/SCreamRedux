@@ -10,12 +10,14 @@ No game data is included. You need your own copy of the game.
 
 ## Status
 
-The Director's Cut boots and both campaigns play from their intros: cube-map
-scenes with the original camera behaviour and hotspots, close-ups, Theora
-cutscenes, Vorbis sound/music/voices, subtitles and dialogue choices. Not yet:
-the main menu, inventory and journal screens, saving, sky/weather effects, and
-the 2006 release (Lua 5.0 scripts). `scream --api-status` lists the state of all
-87 API functions.
+The Director's Cut is playable from start to finish in principle: intro and
+main menu, both campaigns, cube-map scenes with the original camera behaviour
+and hotspots, close-ups, Theora cutscenes, Vorbis sound/music/voices,
+subtitles, dialogue choices, inventory (with the tutorial hints), journal, and
+save/load. Not yet: sky/weather effects (fog, rain, night, candle light), the
+"alternate control" mouse-look option, and the 2006 release (Lua 5.0 scripts).
+`scream --api-status` lists the state of all 87 API functions. A full
+play-through hasn't been done yet, so expect script-specific bugs.
 
 See [NOTES.md](NOTES.md) for the reverse-engineering notes.
 
@@ -45,7 +47,7 @@ Later `--data` directories override earlier ones, so the disc 2 update's
 ## Running
 
 ```
---game sdc|tlv          main game (default) or The Last Visit
+--game sdc|tlv          skip the intro and menu: main game or The Last Visit
 --start ROOM[:NODE]     skip the intro and start at a location, e.g. garden:n1
 --hotspots              draw clickable areas
 --trace                 log every sc* call
@@ -54,6 +56,11 @@ Later `--data` directories override earlier ones, so the disc 2 update's
 --verify-media          decode every image, sound and video in the archives
 ```
 
-Controls: move the mouse to the screen edges (or hold the right button and drag)
-to look around, left-click to interact (also skips cutscenes; Esc/Space too),
-F12 for a screenshot, Esc to quit.
+Controls (as the original): move the mouse to the screen edges to look around,
+left-click to interact, right-click to open/close the inventory (left-click an
+item to pick it up, then left-click where to use it). Esc opens the menu or
+skips a cutscene. Extras: middle-drag to look around, F12 for a screenshot.
+
+Saves and setup preferences go to the user data folder
+(`~/Library/Application Support/SCreamRedux/Scratches` on macOS) in this
+port's own format.

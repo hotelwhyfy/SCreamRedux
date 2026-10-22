@@ -299,6 +299,7 @@ int scHintsSet(lua_State* L) { E->hints[argInt(L, 1)] = argStr(L, 2); return 0; 
 int scHints(lua_State* L) { E->hintState = argInt(L, 1); return 0; }
 
 int scMenuSet(lua_State* L) {
+    E->menu.font = E->font;  // the font active when the menu is defined (font-menu.tga)
     E->menu.images.clear();
     for (int i = 1; i <= 7; ++i) E->menu.images.push_back(argStr(L, i));
     E->menu.newGame.clear();
@@ -307,7 +308,7 @@ int scMenuSet(lua_State* L) {
 }
 int scMenuSetEx(lua_State* L) { E->menu.extra[argInt(L, 1)] = argStr(L, 2); return 0; }
 int scMenuSetSaveFunc(lua_State* L) { E->menu.saveFunc = true; return 0; }
-int scMenuShow(lua_State* L) { return 0; }
+int scMenuShow(lua_State* L) { E->openMenu(); return 0; }
 
 // ---------------------------------------------------------------- dialogue
 
@@ -483,10 +484,10 @@ const Entry kEntries[] = {
     FN(scLoadSubtitle, S::Partial, "name stored; needs .srt parsing"),
     FN(scLock, S::Done, "boolean, as in scream.exe"),
     FN(scLookAt, S::Done, ""),
-    FN(scMenuSet, S::Partial, "stored; needs menu"),
-    FN(scMenuSetEx, S::Partial, "stored; needs menu"),
-    FN(scMenuSetSaveFunc, S::Partial, "stored; needs save system"),
-    FN(scMenuShow, S::Stub, "needs main menu"),
+    FN(scMenuSet, S::Done, ""),
+    FN(scMenuSetEx, S::Done, "intro/outro handlers, music, background"),
+    FN(scMenuSetSaveFunc, S::Done, "save() names the slot; save format is our own"),
+    FN(scMenuShow, S::Done, ""),
     FN(scMotion, S::Done, ""),
     FN(scMusicFadeIn, S::Done, "no-op in scream.exe as well"),
     FN(scMusicFadeOut, S::Done, "no-op in scream.exe as well"),
