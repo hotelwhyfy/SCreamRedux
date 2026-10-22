@@ -392,10 +392,10 @@ void Renderer::drawImage(const Texture& t, float x, float y, float w, float h, f
 }
 
 void Renderer::drawImageUV(const Texture& t, float x, float y, float w, float h, float u0, float v0, float u1, float v1,
-                           float alpha, float r, float g, float b) {
+                           float alpha, float r, float g, float b, Blend blend) {
     gl::BindTexture(gl::TEXTURE_2D, t.id);
     gl::Uniform4f(uTint_, r, g, b, alpha);
-    quad2D(x, y, w, h, u0, v0, u1, v1);
+    quad2D(x, y, w, h, u0, v0, u1, v1, blend);
 }
 
 void Renderer::drawRect(float x, float y, float w, float h, float r, float g, float b, float a) {

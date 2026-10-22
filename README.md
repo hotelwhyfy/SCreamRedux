@@ -14,9 +14,12 @@ The Director's Cut is playable from start to finish in principle: intro and
 main menu, both campaigns, cube-map scenes with the original camera behaviour
 and hotspots, close-ups, Theora cutscenes, Vorbis sound/music/voices,
 subtitles, dialogue choices, inventory (with the tutorial hints), journal,
-save/load, and the sky/fog/rain/night/candle/lightning effects. Not yet: the
-"alternate control" mouse-look option, .srt subtitles for the DC intro, and the
-2006 release (Lua 5.0 scripts).
+save/load and quicksave, crossfade transitions, the original keyboard shortcuts
+and gamma correction, and the sky/fog/rain/night/candle/lightning effects. Text
+(feedback, subtitles including the DC intro's .srt, choices, journal) uses the
+original's layout and monospaced font. Not yet: the "alternate control"
+mouse-look option, the original menu layout, and the 2006 release (Lua 5.0
+scripts).
 `scream --api-status` lists the state of all 87 API functions. A full
 play-through hasn't been done yet, so expect script-specific bugs.
 
@@ -59,8 +62,12 @@ Later `--data` directories override earlier ones, so the disc 2 update's
 
 Controls (as the original): move the mouse to the screen edges to look around,
 left-click to interact, right-click to open/close the inventory (left-click an
-item to pick it up, then left-click where to use it). Esc opens the menu or
-skips a cutscene. Extras: middle-drag to look around, F12 for a screenshot.
+item to pick it up, then left-click where to use it). Esc closes the inventory,
+journal or overlay, or opens the menu; Esc or Space skips a cutscene. Keys, as
+scream.exe maps them: A / Left turn left, D / Up turn right, W / Right look up,
+S / Down look down, E / Space look straight ahead; F1 hints, F2 surround music,
+F5 quicksave, F7 quickload, F9 camera speed, F10 text speed, F12 gamma.
+Extras of this port: middle-drag to look around, F11 for a screenshot.
 
 Saves and setup preferences go to the user data folder
 (`~/Library/Application Support/SCreamRedux/Scratches` on macOS) in this

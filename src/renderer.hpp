@@ -87,7 +87,7 @@ public:
     void drawImage(const Texture& t, float x, float y, float w, float h, float alpha = 1);
     // Draw the (u0,v0)-(u1,v1) part of a texture.
     void drawImageUV(const Texture& t, float x, float y, float w, float h, float u0, float v0, float u1, float v1,
-                     float alpha = 1, float r = 1, float g = 1, float b = 1);
+                     float alpha = 1, float r = 1, float g = 1, float b = 1, Blend blend = Blend::Alpha);
     void drawRect(float x, float y, float w, float h, float r, float g, float b, float a);
     // Colour multiplied into drawNode / drawImage (e.g. the inventory's sepia backdrop).
     void setTint(float r, float g, float b) { tint_ = {r, g, b}; }

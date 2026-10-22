@@ -30,7 +30,8 @@ void usage() {
         "  --screenshot FILE write a PNG once the scene settles, then quit\n"
         "  --screenshot-at S take it after S seconds instead of waiting to settle\n"
         "  --exec LUA        run Lua as a handler once startup is idle; debugClick(name)\n"
-        "                    clicks an object in the current view\n"
+        "                    clicks an object in the current view, debugKey(vk) presses a key\n"
+        "  --save-dir DIR    keep saves and preferences in DIR (for tests)\n"
         "  --fullscreen      run fullscreen\n"
         "  --hotspots        draw clickable areas (SC_SHOW_HOTSPOTS)\n"
         "  --trace           log every sc* call\n"
@@ -116,6 +117,7 @@ int main(int argc, char** argv) {
         else if (a == "--script") script = next();
         else if (a == "--game") opts.game = next();
         else if (a == "--start") opts.start = next();
+        else if (a == "--save-dir") opts.saveDir = next();
         else if (a == "--yaw") opts.yaw = std::stof(next());
         else if (a == "--pitch") opts.pitch = std::stof(next());
         else if (a == "--screenshot") opts.screenshot = next();

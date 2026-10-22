@@ -300,6 +300,10 @@ void Engine::captureBaseline() {
 }
 
 std::filesystem::path Engine::saveDir() const {
+    if (!opts.saveDir.empty()) {
+        std::filesystem::create_directories(opts.saveDir);
+        return opts.saveDir;
+    }
     char* pref = SDL_GetPrefPath("SCreamRedux", "Scratches");
     std::filesystem::path dir = pref ? pref : ".";
     SDL_free(pref);

@@ -596,6 +596,7 @@ void api::registerAll(Engine& engine) {
     lua_register(L, "debugClick", debugClick);
     lua_register(L, "debugMouse", [](lua_State* L) { E->debugMouse(float(argNum(L, 1)), float(argNum(L, 2))); return 0; });
     lua_register(L, "debugPress", [](lua_State* L) { E->debugPress(argInt(L, 1)); return 0; });
+    lua_register(L, "debugKey", [](lua_State* L) { E->hotkey(argInt(L, 1)); return 0; });
 }
 
 const api::Info* api::table(int& count) {

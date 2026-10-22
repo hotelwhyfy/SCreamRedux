@@ -23,6 +23,7 @@
 struct Options {
     std::vector<std::filesystem::path> dataDirs;  // searched in order; later ones win
     std::string start;          // "room" or "room:node": skip the menu and go there
+    std::string saveDir;        // saves and preferences (default: the user's app data folder)
     std::string game;           // sdc | tlv: skip the menu and start that game
     std::string screenshot;     // write a PNG once the scene settles, then quit
     double screenshotAt = -1;   // ...or after this many seconds, settled or not
@@ -143,6 +144,7 @@ public:
     void debugMouse(float x, float y);
     void debugPress(int button);
     void debugUseHeld(Object* o) { useHeldOn(o); }
+    void hotkey(int vk);  // 0x4175b0, keyed by Windows virtual-key codes (also debugKey)
     void addTimer(double seconds, const std::string& fn, bool global);
 
     // Engine flags, as in scream.exe:
@@ -187,6 +189,11 @@ private:
     std::map<std::string, LuaValue> luaBaseline_;
     int currentGame_ = -1;
     bool gameRunning_ = false;
+    bool menuShown_ = false;  // 0x4df8d34: once the menu has been shown, Esc opens it instead of quitting
+    int gamma_ = 0;           // 0x4df8b88: 0 off, 1-3 brighten the view by 0.33 / 0.66 / 1.0
+    Renderer::Texture gammaCapture_;
+    static constexpr int kQuickSlot = 11;  // F5/F7 (the original's scream.011)
+    void drawGamma();
     double gameClock_ = 0;
 
     // Main menu (menu.cpp).

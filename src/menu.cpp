@@ -31,6 +31,7 @@ void Engine::openMenu() {
     if (menuOpen())
         return;
     beginTransition();  // 0x412cb0
+    menuShown_ = true;  // 0x4131c0
     menu_ = Screen::Main;
     invOpen_ = journalOpen_ = false;
     sound.pauseGame(true);
@@ -277,15 +278,22 @@ void Engine::drawMenu() {
 // Player preferences from the setup screen, kept next to the saves.
 void Engine::loadUserSettings() {
     std::ifstream in(saveDir() / "settings.cfg");
-    int key;
+    std::string key;
     double value;
-    while (in >> key >> value)
-        if (key == sc::HINTS || key == sc::CAM_SPEED || key == sc::TXT_SPEED)
-            settings[key] = value;
+    while (in >> key >> value) {
+        if (key == "gamma") {
+            gamma_ = std::clamp(int(value), 0, 3);
+            continue;
+        }
+        int k = std::atoi(key.c_str());
+        if (k == sc::HINTS || k == sc::CAM_SPEED || k == sc::TXT_SPEED || k == sc::SURROUND)
+            settings[k] = value;
+    }
 }
 
 void Engine::saveUserSettings() {
     std::ofstream out(saveDir() / "settings.cfg", std::ios::trunc);
-    for (int key : {sc::HINTS, sc::CAM_SPEED, sc::TXT_SPEED})
+    for (int key : {sc::HINTS, sc::CAM_SPEED, sc::TXT_SPEED, sc::SURROUND})
         out << key << " " << settingNum(settings, key, 0) << "\n";
+    out << "gamma " << gamma_ << "\n";
 }

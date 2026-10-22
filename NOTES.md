@@ -257,7 +257,26 @@ ECX), so Ghidra's decompiler hides arguments; read the disassembly alongside. Sc
   (×60/fps): in at speed·0.001, out at speed·0.0001 after the duration; cleared at full fade.
   A glow pass (flag `0x4df8de0`) is dead code: nothing sets it.
 - SC_TXT_SPEED / SC_CAM_SPEED (`0x4df8d0c` / `…d08`, set in `0x40fde0`): SC_LO/MED/HI → 25/50/75,
-  other values as given. Hotkey handler `0x4175b0` also changes them (not ported yet).
+  other values as given.
+
+### Keyboard (`0x4175b0`, registered as the media layer's key callback; Windows VK codes)
+
+- Camera (each after a short fade, `0x407b20`, progress 0.75; `0x407d30`/`0x407d10` get/set
+  the look angle and y): VK_LEFT, 'A', VK_NUMPAD1 → angle −1.57; VK_UP, 'D', VK_NUMPAD4 →
+  +1.57; VK_RIGHT, 'W', VK_F8 → y 1.25; VK_DOWN, 'S', VK_F4 → y −1.25; Space, 'E', VK_NUMPAD5
+  → y 0. (The letter cases seem written as characters, which aliases numpad/F-keys, and the
+  arrows look like an assumed LEFT, RIGHT, UP, DOWN order — ported as compiled.)
+- 'L' / VK_SEPARATOR: toggle the log file (`0x4df8b90`, read by the logger `0x404a30`).
+- F1 hints ("hints ON/OFF"), F2 surround music (`0x4df8d04`, restarts the track), F5
+  quicksave (not in the menu; "scream.011", "Game saved"), F7 quickload ("Game loaded"), F9 /
+  F10 camera / text speed 50→75→25→50 ("camera speed NORMAL/FAST/SLOW"), F12 gamma
+  (`0x4df8b88` 0→1→2→3→0, "gamma correction LOW/NORMAL/HIGH/DISABLED"). The setup menu
+  (`0x413640`) calls this handler with F1/F2/F9/F10/F12 for its items.
+- Esc: inventory → close (with a crossfade); journal → close; choice → nothing; overlay →
+  dismiss; else the menu if it has been shown (`0x4df8d34`, set by `0x4131c0`), otherwise quit
+  (`0x410740`). Not handled here inside the menu.
+- Gamma correction (`0x4082a0`, drawn by every screen before the transition): the screen is
+  copied and added back over the view area with (SRC_ALPHA, ONE) at 0.33 / 0.66 / 1.0.
 - Subtitles (`scLoadSubtitle` `0x418080`, player `0x4180b0` called from the per-frame update
   `0x412010`, so also during cutscenes): a counter of whole seconds since loading
   (`0x48bc58`, +1 when ≥ 1000 ms passed). When counter ≥ cue end: text cleared, next cue read

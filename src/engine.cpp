@@ -736,6 +736,104 @@ void Engine::activate(Object* o) {
     perform(o->click);
 }
 
+// The keyboard handler (0x4175b0). Key groups are as compiled in scream.exe,
+// including the arrows: Left turns left, Up turns right, Right looks up.
+void Engine::hotkey(int vk) {
+    auto look = [&](float turn, std::optional<float> y) {  // 0x407d30 / 0x407d10, after a short fade
+        beginTransition(0.75f);
+        camAnim_.active = false;
+        cam.yaw = wrap180(cam.yaw + turn * 180.0f / 3.14159265f);
+        if (y) cam.pitch = std::atan(*y) * 180.0f / 3.14159265f;
+    };
+    auto cycleSpeed = [&](int key, const char* name) {  // 50 -> 75 -> 25 -> 50
+        double v = 50;
+        if (auto* d = std::get_if<double>(&settings[key])) v = *d;
+        const char* level;
+        if (v > 49 && v < 51) v = 75, level = "FAST";
+        else if (v == 75) v = 25, level = "SLOW";
+        else v = 50, level = "NORMAL";
+        settings[key] = v;
+        feedback(std::string(name) + " " + level);
+        saveUserSettings();
+    };
+    switch (vk) {
+    case 0x25: case 'A': case 0x61: look(-1.57f, std::nullopt); break;
+    case 0x26: case 'D': case 0x64: look(1.57f, std::nullopt); break;
+    case 0x27: case 'W': case 0x77: look(0, 1.25f); break;
+    case 0x28: case 'S': case 0x73: look(0, -1.25f); break;
+    case 0x20: case 'E': case 0x65: look(0, 0.0f); break;
+    case 'L': case 0x6c: opts.trace = !opts.trace; break;  // the original toggles its log file
+    case 0x70: {  // F1
+        bool on = !hintsOn();
+        settings[sc::HINTS] = on ? 1.0 : 0.0;
+        feedback(on ? "hints ON" : "hints OFF");
+        saveUserSettings();
+        break;
+    }
+    case 0x71: {  // F2 (only the setting: this port plays the front channels only)
+        bool on = !(std::holds_alternative<double>(settings[sc::SURROUND]) && std::get<double>(settings[sc::SURROUND]) != 0);
+        settings[sc::SURROUND] = on ? 1.0 : 0.0;
+        feedback(on ? "surround music ON" : "surround music OFF");
+        saveUserSettings();
+        break;
+    }
+    case 0x74:  // F5: quicksave
+        if (!menuOpen() && gameRunning_ && saveSlot(kQuickSlot))
+            feedback("Game saved");
+        break;
+    case 0x76:  // F7: quickload
+        if (!slotDescription(kQuickSlot).empty() && loadSlot(kQuickSlot)) {
+            closeMenu();
+            feedback("Game loaded");
+        }
+        break;
+    case 0x78: cycleSpeed(sc::CAM_SPEED, "camera speed"); break;  // F9
+    case 0x79: cycleSpeed(sc::TXT_SPEED, "text speed"); break;    // F10
+    case 0x7b: {  // F12
+        static const char* names[] = {"gamma correction DISABLED", "gamma correction LOW", "gamma correction NORMAL",
+                                      "gamma correction HIGH"};
+        gamma_ = (gamma_ + 1) % 4;
+        feedback(names[gamma_]);
+        saveUserSettings();
+        break;
+    }
+    case 0x1b:  // Esc (the menu handles its own)
+        if (menuOpen() || choice_)
+            break;
+        if (invOpen_) {
+            beginTransition();
+            invOpen_ = false;
+        } else if (journalOpen_) {
+            closeJournal();
+        } else if (overlay) {
+            beginTransition();
+            sound.playFx(overlay->args[2]);
+            overlay = nullptr;
+        } else if (menuShown_) {
+            if (!scriptBusy()) openMenu();
+        } else {
+            quit_ = true;  // 0x410740
+        }
+        break;
+    }
+}
+
+// Gamma correction (0x4082a0): the view area is added onto itself at 0.33 / 0.66 / 1.0.
+void Engine::drawGamma() {
+    static const float level[] = {0, 0.33f, 0.66f, 1.0f};
+    if (gamma_ <= 0 || gamma_ > 3 || capturing_)
+        return;
+    renderer.captureFrame(gammaCapture_);
+    int w = gammaCapture_.width, h = gammaCapture_.height;
+    if (w <= 0 || h <= 0)
+        return;
+    Canvas c = Canvas::fit(w, h);
+    float u0 = c.x / float(w), u1 = (c.x + sc::SCREEN_W * c.scale) / float(w);
+    float v0 = 1 - (c.y + kBar * c.scale) / float(h), v1 = 1 - (c.y + (sc::SCREEN_H - kBar) * c.scale) / float(h);
+    renderer.drawImageUV(gammaCapture_, 0, kBar, sc::SCREEN_W, sc::SCREEN_H - 2 * kBar, u0, v0, u1, v1, level[gamma_], 1, 1,
+                         1, Blend::AddAlpha);
+}
+
 void Engine::debugMouse(float x, float y) {
     int w, h;
     SDL_GetWindowSizeInPixels(window_, &w, &h);
@@ -761,18 +859,32 @@ Object* Engine::findInView(const std::string& name) {
 void Engine::handleEvent(const SDL_Event& e) {
     switch (e.type) {
     case SDL_EVENT_QUIT: quit_ = true; break;
-    case SDL_EVENT_KEY_DOWN:
+    case SDL_EVENT_KEY_DOWN: {
+        // The original's keys are Windows virtual-key codes.
+        SDL_Keycode k = e.key.key;
+        int vk = 0;
+        if (k >= SDLK_A && k <= SDLK_Z) vk = 'A' + int(k - SDLK_A);
+        else if (k >= SDLK_F1 && k <= SDLK_F12) vk = 0x70 + int(k - SDLK_F1);
+        else if (k >= SDLK_KP_1 && k <= SDLK_KP_9) vk = 0x61 + int(k - SDLK_KP_1);
+        else if (k == SDLK_ESCAPE) vk = 0x1b;
+        else if (k == SDLK_SPACE) vk = 0x20;
+        else if (k == SDLK_LEFT) vk = 0x25;
+        else if (k == SDLK_UP) vk = 0x26;
+        else if (k == SDLK_RIGHT) vk = 0x27;
+        else if (k == SDLK_DOWN) vk = 0x28;
+        else if (k == SDLK_KP_COMMA) vk = 0x6c;  // VK_SEPARATOR
         if (aborted_)
             leaveAbortedGame();
-        else if (menuOpen() && e.key.key == SDLK_ESCAPE)
-            menuBack();
-        else if (video_ && (e.key.key == SDLK_ESCAPE || e.key.key == SDLK_SPACE))
+        else if (video_ && (k == SDLK_ESCAPE || k == SDLK_SPACE))
             stopCutscene();
-        else if (e.key.key == SDLK_ESCAPE && gameRunning_ && !scriptBusy())
-            openMenu();
-        else if (e.key.key == SDLK_F12)
+        else if (menuOpen() && k == SDLK_ESCAPE)
+            menuBack();
+        else if (k == SDLK_F11)  // an addition of this port
             SDL_Log("screenshot: %s", renderer.capture("scream-screenshot.png").c_str());
+        else if (vk && !video_)
+            hotkey(vk);
         break;
+    }
     case SDL_EVENT_MOUSE_MOTION:
         mouseX_ = e.motion.x;
         mouseY_ = e.motion.y;
@@ -905,6 +1017,7 @@ void Engine::render() {
         return;
     if (menuOpen()) {
         drawMenu();
+        drawGamma();
         drawTransition();
         drawCursor(nullptr, 0);
         return;
@@ -922,6 +1035,7 @@ void Engine::render() {
     View* v = view();
     if (journalOpen_) {
         drawJournal();
+        drawGamma();
         drawTransition();
         drawFeedback();
         drawCursor(nullptr, 0);
@@ -955,6 +1069,7 @@ void Engine::render() {
             renderer.drawImage(*t, 0, kBar, sc::SCREEN_W, sc::SCREEN_H - 2 * kBar);
 
     renderer.setTint(1, 1, 1);
+    drawGamma();
     drawTransition();
 
     ensureFont();
@@ -985,10 +1100,11 @@ void Engine::run() {
     if (!opts.start.empty()) {
         // Debug: jump straight to a location.
         auto colon = opts.start.find(':');
-        gameRunning_ = switchRoom(opts.start.substr(0, colon));
+        gameRunning_ = menuShown_ = switchRoom(opts.start.substr(0, colon));
         if (colon != std::string::npos)
             switchNode(opts.start.substr(colon + 1));
     } else if (!opts.game.empty()) {
+        menuShown_ = true;
         startNewGame(opts.game == "tlv" ? 1 : 0);
     } else {
         // As the original: the intro handler (logo videos), then the main menu.
