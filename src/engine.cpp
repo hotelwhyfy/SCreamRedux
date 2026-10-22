@@ -97,6 +97,9 @@ void Engine::mountResources() {
 bool Engine::init() {
     if (window_)
         return true;
+    // macOS: in fullscreen the menu bar (and title bar) would drop down when
+    // the mouse reaches the top edge, which the edge panning does all the time.
+    SDL_SetHint(SDL_HINT_VIDEO_MAC_FULLSCREEN_MENU_VISIBILITY, "0");
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SDL_Init: %s", SDL_GetError());
         return false;
@@ -110,7 +113,7 @@ bool Engine::init() {
     SDL_WindowFlags flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
     if (!opts.windowed)
         flags |= SDL_WINDOW_FULLSCREEN;
-    window_ = SDL_CreateWindow("SCream Redux", 1024, 768, flags);
+    window_ = SDL_CreateWindow("SCream Redux", opts.windowW, opts.windowH, flags);
     if (!window_ || !(gl_ = SDL_GL_CreateContext(window_))) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "window/GL: %s", SDL_GetError());
         return false;
@@ -569,9 +572,14 @@ void Engine::beginTransition(float progress, bool unlock) {
     int w = transition_.capture.width, h = transition_.capture.height;
     if (w <= 0 || h <= 0)
         return;
+    // The view spans the whole window width (nodeViewport), wider than the 4:3
+    // canvas on a widescreen window, so the capture covers that width too;
+    // otherwise the sides would cut to the new view while the middle fades.
     Canvas c = Canvas::fit(w, h);
-    transition_.u0 = c.x / float(w);
-    transition_.u1 = (c.x + sc::SCREEN_W * c.scale) / float(w);
+    transition_.u0 = 0;
+    transition_.u1 = 1;
+    transition_.x0 = -c.x / c.scale;
+    transition_.x1 = (w - c.x) / c.scale;
     transition_.v0 = 1 - (c.y + kBar * c.scale) / float(h);  // the capture is bottom row first
     transition_.v1 = 1 - (c.y + (sc::SCREEN_H - kBar) * c.scale) / float(h);
     transition_.progress = progress;
@@ -583,7 +591,7 @@ void Engine::drawTransition() {
     Transition& t = transition_;
     if (!t.active || capturing_)
         return;
-    renderer.drawImageUV(t.capture, 0, kBar, sc::SCREEN_W, sc::SCREEN_H - 2 * kBar, t.u0, t.v0, t.u1, t.v1,
+    renderer.drawImageUV(t.capture, t.x0, kBar, t.x1 - t.x0, sc::SCREEN_H - 2 * kBar, t.u0, t.v0, t.u1, t.v1,
                          1 - t.progress);
     double speed = 25;
     if (auto* v = std::get_if<double>(&settings[sc::MOV_SPEED])) speed = *v;

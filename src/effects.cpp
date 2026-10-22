@@ -35,6 +35,16 @@ Preset preset(int p) {
     }
 }
 
+// SC_SCREEN_COLOR presets (0x40d4e0): RGBA of the tint pass; MORNING draws nothing.
+std::array<float, 4> screenPreset(int p) {
+    switch (p) {
+    case sc::DAWN: return {1.0f, 0.55f, 0.55f, 0.025f};
+    case sc::DUSK: return {1.0f, 0.25f, 0.25f, 0.02f};
+    case sc::STORM: return {0.0f, 0.0f, 0.15f, 0.15f};
+    default: return {1.0f, 1.0f, 1.0f, 0.0f};  // SC_MORNING
+    }
+}
+
 constexpr double kFps = 60;                      // the original's reference rate
 constexpr float kColorStep = 0.0001f * kFps;     // ambience colour change per second
 constexpr float kFovBase = 45, kFovMin = 35, kFovMax = 55, kFovStep = 0.005f * kFps;
@@ -76,17 +86,47 @@ void Engine::updateEffects(double dt) {
     Rgb sky = preset(ambiencePreset(sc::SKY_COLOR)).sky;
     Rgb horizon = preset(ambiencePreset(sc::SKY_COLOR)).horizon;
     Rgb cloud = preset(ambiencePreset(sc::CLOUD_COLOR)).cloud;
-    if (!fx_.initialized || fx_.snap) {
+    const bool all = !fx_.initialized || fx_.snap;
+    if (all || fx_.snapKeys.count(sc::SKY_COLOR)) {
         fx_.sky = sky;
         fx_.horizon = horizon;
-        fx_.cloud = cloud;
-        fx_.initialized = true;
-        fx_.snap = false;
     }
+    if (all || fx_.snapKeys.count(sc::CLOUD_COLOR)) fx_.cloud = cloud;
     const float step = kColorStep * float(dt);
     approach(fx_.sky, sky, step);
     approach(fx_.horizon, horizon, step);
     approach(fx_.cloud, cloud, step);
+
+    // Screen colour: every channel steps |target - start| * 0.001 per frame (10 * 0.0001,
+    // fixed when the change starts), so all arrive together after 1000 frames; done
+    // within 0.001 of the target.
+    const int screenTarget = ambiencePreset(sc::SCREEN_COLOR);
+    const auto target = screenPreset(screenTarget);
+    if (all || fx_.snapKeys.count(sc::SCREEN_COLOR)) {
+        fx_.screen = target;
+        fx_.screenPreset = screenTarget;
+        fx_.screenFading = false;
+    } else if (screenTarget != fx_.screenPreset) {
+        if (!fx_.screenFading) {
+            for (size_t i = 0; i < 4; ++i) fx_.screenStep[i] = std::abs(target[i] - fx_.screen[i]) * 10 * 0.0001f;
+            fx_.screenFading = true;
+        }
+        bool done = true;
+        for (size_t i = 0; i < 4; ++i) {
+            const float s = fx_.screenStep[i] * float(kFps * dt);
+            float& c = fx_.screen[i];
+            c = c < target[i] ? std::min(target[i], c + s) : std::max(target[i], c - s);
+            done = done && std::abs(target[i] - c) < 0.001f;
+        }
+        if (done) {
+            fx_.screen = target;
+            fx_.screenPreset = screenTarget;
+            fx_.screenFading = false;
+        }
+    }
+    fx_.initialized = true;
+    fx_.snap = false;
+    fx_.snapKeys.clear();
 
     // Scrolling: clouds and fog by SC_SKY_SPEED/10 (integer, as the original), rain at a fixed rate.
     double skySpeed = 25;
@@ -205,7 +245,11 @@ void Engine::applyLighting(const std::function<void(float, float, float, float, 
                            const std::function<void(float, float, float, float, Blend)>& wash) {
     if (flag(sc::NIGHT)) {
         overlay(0.1f, 0.1f, 0.5f, 0.5f, Blend::Alpha);
-    } else if (flag(sc::RAIN) && !flag(sc::CANDLE)) {
+    } else if (!flag(sc::RAIN) || flag(sc::CANDLE)) {
+        // The scene again in the SC_SCREEN_COLOR tint.
+        const auto& c = fx_.screen;
+        if (c[3] > 0) overlay(c[0], c[1], c[2], c[3], Blend::Alpha);
+    } else {
         switch (scheduleState(kLightning, fx_.lightningClock)) {
         case 0: overlay(0.5f, 0.5f, 0.5f, 0.5f, Blend::Alpha); break;
         case 1: overlay(0.25f, 0.25f, 0.25f, 0.25f, Blend::AddOne); wash(1, 1, 1, 0.05f, Blend::Alpha); break;

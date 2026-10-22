@@ -33,6 +33,7 @@ void usage() {
         "                    clicks an object in the current view, debugKey(vk) presses a key\n"
         "  --save-dir DIR    keep saves and preferences in DIR (for tests)\n"
         "  --fullscreen      run fullscreen\n"
+        "  --window WxH      window size (default 1024x768)\n"
         "  --hotspots        draw clickable areas (SC_SHOW_HOTSPOTS)\n"
         "  --trace           log every sc* call\n"
         "  --api-status      print implementation status of all sc* functions\n"
@@ -132,6 +133,7 @@ int main(int argc, char** argv) {
         else if (a == "--screenshot-at") opts.screenshotAt = std::stod(next());
         else if (a == "--exec") opts.exec = next();
         else if (a == "--fullscreen") opts.windowed = false;
+        else if (a == "--window") { std::string v = next(); opts.windowW = std::stoi(v); opts.windowH = std::stoi(v.substr(v.find('x') + 1)); }
         else if (a == "--trace") opts.trace = true;
         else if (a == "--hotspots") opts.hotspots = true;
         else if (a == "--api-status") { printApiStatus(); return 0; }

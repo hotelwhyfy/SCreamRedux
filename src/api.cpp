@@ -76,16 +76,28 @@ int scSet(lua_State* L) {
     return 0;
 }
 
+// scGet (0x405330): strings for SC_LANGUAGE and the current room and node
+// (0x4125d0); numbers for SC_TXT_SPEED, SC_MOV_SPEED and SC_HINTS (0x412610);
+// 0 for every other key, SC_ZOOM and the other settings included.
 int scGet(lua_State* L) {
     int key = argInt(L, 1);
-    if (key == sc::ROOM) { lua_pushstring(L, E->room ? E->room->name.c_str() : ""); return 1; }
-    if (key == sc::NODE) { lua_pushstring(L, E->node ? E->node->name.c_str() : ""); return 1; }
-    if (key == sc::ZOOM) { lua_pushstring(L, E->zooms.empty() ? "" : E->zooms.back()->name.c_str()); return 1; }
-    auto it = E->settings.find(key);
-    if (it == E->settings.end()) { lua_pushnumber(L, 0); return 1; }
-    if (auto* d = std::get_if<double>(&it->second)) lua_pushnumber(L, *d);
-    else lua_pushstring(L, std::get<std::string>(it->second).c_str());
-    return 1;
+    auto number = [&](int k) {
+        auto it = E->settings.find(k);
+        auto* d = it == E->settings.end() ? nullptr : std::get_if<double>(&it->second);
+        return d ? *d : 0.0;
+    };
+    switch (key) {
+    case sc::ROOM: lua_pushstring(L, E->room ? E->room->name.c_str() : ""); return 1;
+    case sc::NODE: lua_pushstring(L, E->node ? E->node->name.c_str() : ""); return 1;
+    case sc::LANGUAGE: {
+        auto it = E->settings.find(key);
+        auto* s = it == E->settings.end() ? nullptr : std::get_if<std::string>(&it->second);
+        lua_pushstring(L, s ? s->c_str() : "");
+        return 1;
+    }
+    case sc::TXT_SPEED: case sc::MOV_SPEED: case sc::HINTS: lua_pushnumber(L, number(key)); return 1;
+    default: lua_pushnumber(L, 0); return 1;
+    }
 }
 
 // scEnable/scDisable(SC_OBJECT) toggle the bound object (only that one: 0x40fa60
@@ -116,7 +128,7 @@ int scLoadSettings(lua_State* L) { E->loadSettings(argStr(L, 1)); return 0; }
 // switches at once, 0 fades slowly (0x40ca50).
 int scSetAmbience(lua_State* L) {
     E->ambience[argInt(L, 1)] = {argInt(L, 2), argInt(L, 3)};
-    if (argInt(L, 3) != 0) E->snapAmbience();
+    if (argInt(L, 3) != 0) E->snapAmbience(argInt(L, 1));
     return 0;
 }
 
@@ -488,7 +500,7 @@ const Entry kEntries[] = {
     FN(scFeedbackEx, S::Done, ""),
     FN(scFont, S::Done, ""),
     FN(scFootstep, S::Done, "played when walking to the node"),
-    FN(scGet, S::Partial, "location + stored settings"),
+    FN(scGet, S::Done, "room/node/language strings; text speed, move speed, hints; 0 otherwise"),
     FN(scGo, S::Done, "leaves wait mode"),
     FN(scHints, S::Done, "inventory tutorial hints"),
     FN(scHintsSet, S::Done, ""),
@@ -533,7 +545,7 @@ const Entry kEntries[] = {
     FN(scScriptAdd, S::Done, ""),
     FN(scScriptGo, S::Done, ""),
     FN(scSet, S::Done, ""),
-    FN(scSetAmbience, S::Partial, "sky and cloud colours; SC_SCREEN_COLOR use not found yet"),
+    FN(scSetAmbience, S::Done, "sky, cloud and screen colours; the flag sets that colour at once"),
     FN(scSetLastVisited, S::Done, ""),
     FN(scSleep, S::Done, "freezes camera input while sleeping"),
     FN(scStill, S::Done, ""),

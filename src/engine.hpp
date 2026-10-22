@@ -33,6 +33,7 @@ struct Options {
     bool trace = false;         // log every sc* call
     bool hotspots = false;      // SC_SHOW_HOTSPOTS debug overlay
     bool windowed = true;
+    int windowW = 1024, windowH = 768;  // --window
     bool verifyMedia = false;   // decode every asset and exit
     bool check = false;         // validate the built world, then exit (check.cpp)
     bool turbo = false;         // fast-forward for automated runs: no audio or video, fast clock
@@ -95,7 +96,7 @@ public:
     std::map<int, std::pair<int, int>> ambience;  // scSetAmbience: key -> (preset, flag)
 
     bool flag(int f) const;  // scEnable/scDisable state
-    void snapAmbience() { fx_.snap = true; }  // scSetAmbience(..., 1): no fade
+    void snapAmbience(int key) { fx_.snapKeys.insert(key); }  // scSetAmbience(key, preset, 1): no fade
 
     // Locate a file in the data directories (last match wins).
     std::filesystem::path findData(const std::string& name) const;
@@ -260,8 +261,13 @@ private:
 
     // Sky, weather and lighting (effects.cpp).
     struct Effects {
-        bool initialized = false, snap = false;
+        bool initialized = false, snap = false;  // snap: every colour at once (after a load)
+        std::set<int> snapKeys;                  // colours to set at once (scSetAmbience flag)
         std::array<float, 3> sky{}, horizon{}, cloud{};
+        // SC_SCREEN_COLOR (0x40d4e0): tint of a second, alpha blended pass over the scene.
+        std::array<float, 4> screen{}, screenStep{};
+        int screenPreset = 0;
+        bool screenFading = false;
         double cloudScroll = 0, fogScroll = 0, rainScroll = 0;
         float cloudA = 1, cloudB = 0, cloudTimer = 0;  // layer A starts visible
         int cloudState = 0;
@@ -331,6 +337,7 @@ private:
         float progress = 0;  // 0x48baf0: the capture's alpha is 1 - progress
         Renderer::Texture capture;
         float u0 = 0, v0 = 0, u1 = 0, v1 = 0;  // view area in the capture
+        float x0 = 0, x1 = 0;                  // its left/right edge in canvas units (the full window width)
     } transition_;
     bool capturing_ = false;
     void drawTransition();
