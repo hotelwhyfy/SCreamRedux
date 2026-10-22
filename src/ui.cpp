@@ -155,6 +155,10 @@ void Engine::drawHeldCursor() {
     if (auto* t = renderer.texture(res, held->icon)) {
         float x, y;
         canvasMouse(x, y);
+        if (fpsActive()) {
+            x = sc::SCREEN_W / 2.0f;
+            y = sc::SCREEN_H / 2.0f;
+        }
         Box b = slotBox(0);
         renderer.drawImage(*t, x - b.w / 2, y - b.h / 2, b.w, b.h);
     }
@@ -177,6 +181,7 @@ void Engine::openJournal() {
 void Engine::closeJournal() {
     beginTransition();
     journalOpen_ = false;
+    if (fpsStyle()) recenterPointer(true);  // 0x413ff1
     sound.playFx(journalConfig.closeSound);
 }
 

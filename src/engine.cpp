@@ -18,6 +18,8 @@ constexpr float kEdgeZone = 0.15f;       // edge zones: 15% of the width / view 
 constexpr float kPanFactor = 0.005f;     // radians per pixel of zone depth, x CAM_SPEED/1000
 constexpr float kRampPerSecond = 1.5f;   // acceleration ramp: +0.025 per frame at 60 fps
 constexpr float kPitchLimit = 1.75f;     // pitch is the look vector's y; |y| <= 1.75 (~60.3 deg)
+constexpr float kFpsLook = 0.0003f;      // alternate control: radians per pixel off centre, per frame (0x483238)
+constexpr float kFpsPitchDown = -2.0f;   // ... which lets the view go lower (0x48323c)
 constexpr float kPx = float(sc::SCREEN_W) / Engine::kOrigW;  // canvas units per original pixel (1024x768 mode)
 constexpr float kBar = 64 * kPx;         // UI bars above and below the 3D view: 64 pixels
 constexpr double kLookDuration = 0.6;    // seconds for scLookAt(..., SC_SMOOTH)
@@ -114,6 +116,8 @@ bool Engine::init() {
     if (!opts.windowed)
         flags |= SDL_WINDOW_FULLSCREEN;
     window_ = SDL_CreateWindow("SCream Redux", opts.windowW, opts.windowH, flags);
+    mouseX_ = opts.windowW / 2.0f;  // the pointer starts centred (alternate control looks at its offset)
+    mouseY_ = opts.windowH / 2.0f;
     if (!window_ || !(gl_ = SDL_GL_CreateContext(window_))) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "window/GL: %s", SDL_GetError());
         return false;
@@ -345,7 +349,7 @@ void Engine::feedback(const std::string& text, const std::string& voice) {
     if (auto* v = std::get_if<double>(&settings[sc::TXT_SPEED]); v && *v > 0)
         speed = *v;
     f.count = last + 1;
-    f.start = now();
+    f.start = textClock_;
     f.duration = int(100 / speed) + (n <= 16 ? 32 : n) / 16;
     f.fresh = true;
 }
@@ -509,7 +513,15 @@ Object* Engine::hovered(int& edge) {
     Canvas c = Canvas::fit(w, h);
     const float zoneY = std::floor((kOrigH - 192) * kEdgeZone) * kPx;
     const float cy = c.toCanvasY(my);
-    if (mx < w * kEdgeZone) edge = sc::LEFT;
+    if (fpsStyle()) {
+        // Alternate control: the zones close in to a pixel either side of the
+        // centre, so the arrow shows the way the view is turning.
+        const float dx = (mx - w / 2.0f) / c.scale / kPx, dy = (my - h / 2.0f) / c.scale / kPx;
+        if (dx < -1) edge = sc::LEFT;
+        else if (dx > 1) edge = sc::RIGHT;
+        else if (dy < -1) edge = sc::UP;
+        else if (dy > 1) edge = sc::DOWN;
+    } else if (mx < w * kEdgeZone) edge = sc::LEFT;
     else if (mx > w * (1 - kEdgeZone)) edge = sc::RIGHT;
     else if (cy < kBar + zoneY) edge = sc::UP;
     else if (cy > sc::SCREEN_H - 2 * kBar - zoneY) edge = sc::DOWN;
@@ -684,7 +696,7 @@ void Engine::drawFeedback() {
         f.fresh = false;
         f.fade = 1;
     }
-    double t = now() - f.start;
+    double t = textClock_ - f.start;
     int first = 0, end = f.count, offset;
     switch (f.count) {
     case 2: offset = 16; break;
@@ -912,8 +924,9 @@ void Engine::handleEvent(const SDL_Event& e) {
             leaveAbortedGame();
         else if (video_ && (k == SDLK_ESCAPE || k == SDLK_SPACE))
             stopCutscene();
-        else if (menuOpen() && k == SDLK_ESCAPE)
-            menuBack();
+        else if (menuOpen() && k == SDLK_ESCAPE) {
+            // The original's key handler ignores Esc in the menu and its prompts (0x417934).
+        }
         else if (k == SDLK_F11)  // an addition of this port
             SDL_Log("screenshot: %s", renderer.capture("scream-screenshot.png").c_str());
         else if (vk && !video_)
@@ -973,10 +986,76 @@ void Engine::panCamera(double dt) {
     cam.pitch = std::atan(std::clamp(pitchY, -kPitchLimit, kPitchLimit)) * 180.0f / 3.14159265f;
 }
 
+bool Engine::fpsStyle() const {
+    auto it = settings.find(sc::FPS_STYLE);
+    auto* v = it == settings.end() ? nullptr : std::get_if<double>(&it->second);
+    return v && *v != 0;
+}
+
+bool Engine::fpsActive() const {
+    return fpsStyle() && window_ && !menuOpen() && !invOpen_ && !journalOpen_ && !choice_ && !video_ && !aborted_ &&
+           view() && !view()->isZoom;
+}
+
+// Alternate control (0x407e20 with 0x4df8e10 = 1): every frame the view turns
+// by the pointer's distance from the screen centre (beyond one pixel), with no
+// camera speed and no ramp; up to a look y of 1.75, down to -2.0.
+void Engine::fpsCamera(double dt) {
+    int w, h;
+    SDL_GetWindowSizeInPixels(window_, &w, &h);
+    Canvas c = Canvas::fit(w, h);
+    float density = SDL_GetWindowPixelDensity(window_);
+    // Offsets in the original's screen pixels (1024x768 mode).
+    const float dx = (mouseX_ * density - w / 2.0f) / c.scale / kPx;
+    const float dy = (mouseY_ * density - h / 2.0f) / c.scale / kPx;
+    const float step = kFpsLook * 60.0f * float(dt);
+    float yaw = cam.yaw * 3.14159265f / 180.0f;
+    float pitchY = std::tan(cam.pitch * 3.14159265f / 180.0f);
+    if (dx < 0) yaw -= (-dx - 1) * step;
+    else if (dx > 0) yaw += (dx - 1) * step;
+    if (dy < 0 && pitchY <= kPitchLimit) pitchY += (-dy - 1) * step;
+    else if (dy > 0 && pitchY >= kFpsPitchDown) pitchY -= (dy - 1) * step;
+    cam.yaw = wrap180(yaw * 180.0f / 3.14159265f);
+    cam.pitch = std::atan(pitchY) * 180.0f / 3.14159265f;
+    recenterPointer(false);
+}
+
+// The pointer springs back (0x416a8c): a tenth of the way to the centre per
+// frame (at least a pixel), or straight there (leaving the menu or journal).
+void Engine::recenterPointer(bool now) {
+    if (!window_ || opts.turbo || (!now && (locked || capturing_)))
+        return;
+    int w, h;
+    SDL_GetWindowSize(window_, &w, &h);
+    const float cx = w / 2.0f, cy = h / 2.0f;
+    float x = mouseX_, y = mouseY_;
+    if (now) {
+        x = cx;
+        y = cy;
+    } else {
+        const float k = 1 - std::pow(0.9f, 60.0f * float(frameDt_));
+        auto pull = [&](float v, float to) {
+            float d = (to - v) * k;
+            if (std::abs(to - v) >= 1 && std::abs(d) < 1) d = to > v ? 1.0f : -1.0f;
+            return std::abs(to - v) < 1 ? to : v + d;
+        };
+        x = pull(x, cx);
+        y = pull(y, cy);
+    }
+    if (x == mouseX_ && y == mouseY_)
+        return;
+    mouseX_ = x;
+    mouseY_ = y;
+    if (SDL_GetMouseFocus() == window_)  // never move the pointer while it is elsewhere (test runs)
+        SDL_WarpMouseInWindow(window_, x, y);
+}
+
 void Engine::update(double dt) {
     frameDt_ = dt;
     if (menuOpen()) {
         sound.update(dt);  // menu music only; the game is paused
+        updateEffects(dt);  // the menu background's clouds move on
+        updateMenu();
         return;
     }
     double t = now();
@@ -992,7 +1071,8 @@ void Engine::update(double dt) {
         }
     } else if (motion && !locked && !scriptBusy() && view() && !view()->isZoom && !dragging_ && !aborted_ &&
                !invOpen_ && !journalOpen_) {
-        panCamera(dt);
+        if (fpsStyle()) fpsCamera(dt);
+        else panCamera(dt);
     } else {
         panRamp_ = 0;
     }
@@ -1027,7 +1107,8 @@ void Engine::drawCursor(Object* hover, int edge) {
         drawHeldCursor();
         return;
     }
-    if (choice_ || invOpen_ || journalOpen_ || menuOpen()) kind = sc::NORMAL;
+    if (menuOpen() && menuBlackUntil_ > 0 && flag(sc::WAIT)) kind = sc::WAIT;  // the menu's scSleep
+    else if (choice_ || invOpen_ || journalOpen_ || menuOpen()) kind = sc::NORMAL;
     else if (locked || scriptBusy()) kind = sc::WAIT;
     else if (hover) kind = hover->cursor;
     else if (edge && motion) kind = edge;  // SC_LEFT..SC_DOWN double as the pan cursors
@@ -1040,6 +1121,10 @@ void Engine::drawCursor(Object* hover, int edge) {
     if (auto* t = renderer.texture(res, it->second)) {
         float x, y;
         canvasMouse(x, y);
+        if (fpsActive()) {  // alternate control: the cursor stays at the centre (0x416b91)
+            x = sc::SCREEN_W / 2.0f;
+            y = sc::SCREEN_H / 2.0f;
+        }
         renderer.drawImage(*t, x - t->width / 2.0f, y - t->height / 2.0f, float(t->width), float(t->height));
     }
 }
@@ -1052,8 +1137,6 @@ void Engine::render() {
         return;
     if (menuOpen()) {
         drawMenu();
-        drawGamma();
-        drawTransition();
         drawCursor(nullptr, 0);
         return;
     }
@@ -1141,6 +1224,9 @@ void Engine::run() {
             return S::None;
         return zooms.empty() ? S::Node : S::Zoom;
     };
+    // The DC exe starts with alternate control on (0x40f451, nothing saves it);
+    // the 2006 one has no such option. We keep the player's choice across runs.
+    settings[sc::FPS_STYLE] = release2006 ? 0.0 : 1.0;
     loadUserSettings();
 
     if (!opts.start.empty()) {
@@ -1167,11 +1253,6 @@ void Engine::run() {
         SDL_Event e;
         while (SDL_PollEvent(&e))
             handleEvent(e);
-        if (deferred_) {
-            auto action = std::move(deferred_);
-            deferred_ = nullptr;
-            action();
-        }
         double t = realTime();
         double dt = t - last;
         last = t;
@@ -1179,6 +1260,7 @@ void Engine::run() {
             dt = kTurboStep;  // fixed, fast game time per frame
         if (!menuOpen())
             gameClock_ += dt;
+        textClock_ += dt;
         update(dt);
         if (opts.crawl && !crawlStep())
             quit_ = true;
@@ -1191,10 +1273,6 @@ void Engine::run() {
         }
         if (quitWhenIdle_ && !script.busy())
             quit_ = true;
-        if (menu_ == Screen::Message && t > messageUntil_) {
-            if (afterMessage_ == Screen::None) closeMenu();
-            else menu_ = afterMessage_;
-        }
         if (execPending && !script.busy()) {
             execPending = false;
             script.startCode(opts.exec, "exec");

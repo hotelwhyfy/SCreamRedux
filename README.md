@@ -20,8 +20,8 @@ and gamma correction, and the sky/fog/rain/night/candle/lightning effects. Text
 original's layout and monospaced font. The original 2006 release runs too (its
 Lua 5.0 scripts are translated to 5.1 bytecode as they load). Both campaigns of
 the Director's Cut and the 2006 game have been played through to their endings
-by the automated player (`--explore`). Not yet: the "alternate control"
-mouse-look option and the original menu layout.
+by the automated player (`--explore`). The menu follows the original's layout.
+Not yet: typing a name for a saved game, and slideshow mode.
 `scream --api-status` lists the state of all 87 API functions.
 
 See [NOTES.md](NOTES.md) for the reverse-engineering notes.
@@ -66,8 +66,10 @@ release (scripts and `scream.res` from the installer, `scratches.res` from the d
 --verify-media          decode every image, sound and video in the archives
 ```
 
-Controls (as the original): move the mouse to the screen edges to look around,
-left-click to interact, right-click to open/close the inventory (left-click an
+Controls (as the original): the Director's Cut starts with "alternate control"
+on, where the view follows the mouse and the cursor stays in the middle; switch it
+off in Setup to look around by moving the mouse to the screen edges instead (the
+original 2006 way, and the 2006 release's only mode). Left-click to interact, right-click to open/close the inventory (left-click an
 item to pick it up, then left-click where to use it). Esc closes the inventory,
 journal or overlay, or opens the menu; Esc or Space skips a cutscene. Keys, as
 scream.exe maps them: A / Left turn left, D / Up turn right, W / Right look up,

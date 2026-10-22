@@ -7,7 +7,7 @@
 // monospace: one display list per character (0x40bf20) holding a 16x16 pixel
 // quad of the whole cell followed by a 10 pixel advance. drawMono() does the
 // same. The proportional draw()/width()/wrap() measure glyph widths from the
-// alpha channel and serve our own screens (menu).
+// alpha channel and serve our own additions (the inventory label).
 
 #include <array>
 #include <string>
@@ -39,7 +39,7 @@ public:
     // `baseline` is the bottom of the 16 pixel cell, as passed to 0x40c040.
     static constexpr int kMonoCell = 16, kMonoAdvance = 10;
     void drawMono(Renderer& r, const std::string& s, float x, float baseline, float px, float alpha = 1,
-                  TextColor color = {}) const;
+                  TextColor color = {}, Blend blend = Blend::Alpha) const;
 
 private:
     static constexpr int kCell = 32, kGrid = 16;

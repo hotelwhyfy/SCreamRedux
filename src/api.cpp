@@ -326,7 +326,6 @@ int scHintsSet(lua_State* L) { E->hints[argInt(L, 1)] = argStr(L, 2); return 0; 
 int scHints(lua_State* L) { E->hintState = argInt(L, 1); return 0; }
 
 int scMenuSet(lua_State* L) {
-    E->menu.font = E->font;  // the font active when the menu is defined (font-menu.tga)
     E->menu.images.clear();
     for (int i = 1; i <= 7; ++i) E->menu.images.push_back(argStr(L, i));
     E->menu.newGame.clear();
@@ -610,6 +609,7 @@ void api::registerAll(Engine& engine) {
     lua_register(L, "debugClick", debugClick);
     lua_register(L, "debugMouse", [](lua_State* L) { E->debugMouse(float(argNum(L, 1)), float(argNum(L, 2))); return 0; });
     lua_register(L, "debugPress", [](lua_State* L) { E->debugPress(argInt(L, 1)); return 0; });
+    lua_register(L, "debugMenu", [](lua_State* L) { E->debugMenu(argInt(L, 1)); return 0; });
     lua_register(L, "debugKey", [](lua_State* L) { E->hotkey(argInt(L, 1)); return 0; });
 }
 

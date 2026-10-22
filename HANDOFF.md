@@ -37,11 +37,13 @@ a failed `scBind` unbinds; rooms remember the last node; view switches release `
 
 ## Open items
 
-1. Menu: being ported from `0x408550` (layout was our own). Setup screen still
-   lacks some of the original's options (surround, gamma, quality, slideshow,
-   alternate control).
-2. Alternate control (`SC_FPS_STYLE`): the original's mouse-follows-camera mode
-   (free mode `0x407e20`, cursor recentring `0x416a10`) — not ported.
+1. Menu: ported from `0x408550` (layout, prompts, black interludes). Not yet: the
+   save-name entry (the DC manual: "you will then be asked to enter a name for the
+   saved game"; the save callback `+0x244` set by `0x4135b0` is untraced), the look
+   reset when toggling slideshow/alternate control (`0x407d10(3.14, 0)`), the hidden
+   language row.
+2. Slideshow mode (`0x4df8ddc`): only the switch is ported, not the stepwise camera
+   (`0x407d50`, `0x4173be`).
 3. 2006 executable: compare its behaviour (and the 2006 patch's) with the DC one
    where it matters (menu without the game choice, no journal/subtitles/ambience
    API in 2006 scripts).

@@ -225,7 +225,7 @@ Verified against the shipped scripts and data while building the engine (`src/`)
   24 fps (640×352, 800×472 or 1024×640); their sound is separate `scFXPlay` calls.
 - Fonts: 512×512 RGBA atlases, 16×16 grid of 32 px cells in Windows-1252 order, no width table.
   The game draws all its text monospace (see "Text" below); our proportional variant
-  (widths measured from alpha) is only for this port's own menu.
+  (widths measured from alpha) is only for this port's inventory label.
 - `scream --verify-media` decodes every asset: DC base 3357/3357, DC+update 3405/3405 OK.
 - Of 2914 files the DC script references, 5 are missing from the archives; only `black.jpg`
   (zoom `kitchen-cellar`) is reachable, and renders black, which is presumably the intent.
@@ -257,7 +257,18 @@ ECX), so Ghidra's decompiler hides arguments; read the disassembly alongside. Sc
   ±1.75 (~60.3°). Edge zones are 15% of the width; vertically 15% of (H−192) from the top bar
   and from H−128. Rate per frame = depth_px × 0.005 × CAM_SPEED/1000 × ramp × 60/fps; ramp
   +0.025/frame, reset when the view stops. CAM_SPEED is 25/50/75. Keyboard steps 0.7855 rad.
-  `SC_FPS_STYLE` selects a cursor-offset look mode that recentres the cursor (not ported yet).
+  `SC_FPS_STYLE` ("alternate control", `0x4df8e10`; the DC manual's "fixed mouse movement")
+  selects a cursor-offset look mode (ported: `Engine::fpsCamera`): zones shrink to W/2±1, H/2±1 (`0x40df60`); per frame yaw ∓= (W/2∓1 − x)·0.0003,
+  pitch ±= (H/2∓1 − y)·0.0003 (clamped by checking pitch ≤ 1.75 / ≥ −2.0 first), with no
+  CAM_SPEED, ramp or frame-time factor (`0x407e20`); every >30 ms the main loop moves the
+  pointer 1/10 of the way (≥ 1 px) back to the centre with SetCursorPos (`0x416a8c`) and the
+  cursor sprite is drawn at the centre (`0x416b91`); leaving the menu, journal or an overlay
+  centres the pointer. The defaults routine (`0x40f260`, called at startup by `0x4061d0`
+  before the cfg is read) sets it to 1 in both DC executables, so the DC starts in this mode;
+  the 2006 executables don't have it. Only the setup menu changes it and nothing saves it
+  (we keep the player's choice in our settings file). The camera and recentring run in node
+  state only (`0x416a8c`, states 4000/4006 of the main loop's table at `0x4169d0`). Slideshow mode (`0x4df8ddc`, default 0) makes edge zones
+  turn in steps on click (`0x407d50`) instead of the continuous pan.
 - 3D view is `glViewport(0, 64, W, H−128)`: 64 px UI bars above and below (800×472 at 800×600).
 - `scSwitch` (`0x4158d0`): ROOM switches the node then calls the room's onEnter hook;
   ZOOM pushes (unless re-showing after ZOOMOUT); ZOOMOUT pops one; ZOOMBACK pops all;
@@ -304,13 +315,30 @@ ECX), so Ghidra's decompiler hides arguments; read the disassembly alongside. Sc
 - Inventory grid (hit test `0x417c90`, state 0xfa3): slot (row, col) at x = 32 + col·(32 +
   size), y = 64 + 96·row, size×size, 10 per row (1024×768 pixels). The inventory draw itself
   shows no text; our hover label is an addition.
-- `FUN_00408550` is the original menu renderer (modes 0–4; the load/save lists draw 11 rows
-  at x = W/2 − 120, y = H − 276 + 16·i). Not ported yet: our menu layout is our own.
-- Menu strings in the exe: "Which game do you want to play?", "Scratches: Director's Cut",
-  "Scratches: The Last Visit", "Start a new game?", "Load a saved game?", "Replace saved
-  game?", "Quit the game?", "Game loaded/saved", "Could not load/save game!"; setup items
-  hints, surround music, camera speed (SLOW/NORMAL/FAST), text speed, gamma correction,
-  quality (LOW/MEDIUM/HIGH), slideshow mode, alternate control. Menu layout is not recovered.
+- Menu (ported in `src/menu.cpp`; renderer `0x408550`, hit test `0x417c90`, click/hover
+  `0x413640`, prompts `0x412fa0`/`0x40b250`/`0x413e70`, open `0x412cb0`, close `0x4130d0`).
+  Modes at menu+0x260: 0 main, 1 load, 2 save, 4 setup; the renderer also takes −1 (main, no
+  game: no "back") and 3 (load with row 0 = scream.011, the quicksave). Images (scMenuSet,
+  texture entries 0x26–0x2c) live in square textures (logo 512, the rest 128) and quads stretch
+  the whole texture. Logo in every mode, top at H/2 − 420. Main: back/new/set/load/save/quit
+  stacked at y = H/2 + 72 + 36·k, 112×120 quads (112×60 images), hit x = W/2 ± 64, y = H − 288
+  + 36·k … +36; load greyed (0.5) without saves, save greyed without a game. Hover: the image
+  or text again in (0, 1, 1, 0.5) with (SRC_ALPHA, ONE). Other modes: title image (load/save/
+  set) 96×48 at y = H/2 + 28, rows of text (current scFont, white) at y = H − 276 + 16·i
+  (files 1–10 as "N. description", nothing for empty ones; setup items x = W/2 − 145, label 21
+  + value 8 chars), hit rows x = W/2 ± 256, 6 px lower than the text; back below (y = H/2 + 262,
+  setup H/2 + 252), hit y = H − 105 … H − 70. Loading only takes rows with a save. Prompts:
+  lines added bottom-up ("no", "yes", question), centred, cyan, the question white; rows
+  H − 32 … H − 16 (yes / Director's Cut) and H − 16 … H (no / The Last Visit), modal. Starting
+  a new game during one asks "Start a new game?", then the game choice with no way back.
+  Load/save close the menu first ("Game loaded/saved" as feedback); the quicksave row can't be
+  saved to. The setup items call the key handler (F1/F2/F9/F10/F12); slideshow mode and
+  alternate control toggle their flags (and reset the look to angle 3.14, y 0 via `0x407d10`,
+  not reproduced); an undrawn 8th row (hit 13) sets the Lua "language" global (not ported).
+  Opening: capture, the "black" zoom for scSleep(1), crossfade to the menu, menu music; closing:
+  music fades, black for scSleep(2), crossfade. Background (scMenuSetEx(SC_IMAGE), `0x4083c0`):
+  the image added (ONE, ONE) over the view area, the cloud layers (`0x40d990`), then the image
+  with alpha. Feedback text shows in the menu, not under a prompt. Esc does nothing there.
 - Saves are this port's own format (`src/save.cpp`): script globals as a diff against the
   start-of-game baseline, plus world/engine state. A new game restores that baseline.
 
@@ -351,7 +379,7 @@ ECX), so Ghidra's decompiler hides arguments; read the disassembly alongside. Sc
   (`0x413640`) calls this handler with F1/F2/F9/F10/F12 for its items.
 - Esc: inventory → close (with a crossfade); journal → close; choice → nothing; overlay →
   dismiss; else the menu if it has been shown (`0x4df8d34`, set by `0x4131c0`), otherwise quit
-  (`0x410740`). Not handled here inside the menu.
+  (`0x410740`). In the menu and its prompts Esc does nothing (`0x417934`).
 - Gamma correction (`0x4082a0`, drawn by every screen before the transition): the screen is
   copied and added back over the view area with (SRC_ALPHA, ONE) at 0.33 / 0.66 / 1.0.
 - Subtitles (`scLoadSubtitle` `0x418080`, player `0x4180b0` called from the per-frame update

@@ -8,12 +8,14 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
 #include <string>
 
 #include "api.hpp"
 #include "images.hpp"
 #include "video.hpp"
 #include "engine.hpp"
+#include "lua50.hpp"
 
 namespace {
 
@@ -103,6 +105,13 @@ int run(const Options& opts, const std::string& script) {
     if (boot.empty() || game.empty()) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "need scream.sc and %s in the data directories", script.c_str());
         return 1;
+    }
+    // The 2006 release (Lua 5.0 scripts) predates the alternate control option.
+    {
+        std::ifstream f(game, std::ios::binary);
+        std::string head(5, '\0');
+        f.read(head.data(), 5);
+        engine.release2006 = lua50::isChunk(head + std::string(1, '\0'));
     }
     // scream.sc defines the SC_* constants; the game script then builds the
     // world and calls scRun(), which only returns when the player quits.

@@ -202,14 +202,7 @@ void Engine::drawNodeScene(const View& v, const Viewport& vp) {
         // Horizon glow: gradient.tga runs dark (zenith) to light (horizon).
         if (auto* g = renderer.optionalTexture(res, "gradient.tga"))
             renderer.drawDome(cam, vp, g, P{fx_.horizon[0], fx_.horizon[1], fx_.horizon[2], 1, Blend::Alpha}, 1, 2, 0, 0);
-        const RendererTexture* c1 = repeating("clouds1.tga", "sky_def.tga");
-        const RendererTexture* c2 = repeating("clouds2.tga", "sky_def.tga");
-        const float sc = 4;
-        renderer.drawDome(cam, vp, c1, P{fx_.cloud[0], fx_.cloud[1], fx_.cloud[2], fx_.cloudA, Blend::Alpha},
-                          sc, sc, 0, float(fx_.cloudScroll));
-        renderer.drawDome(cam, vp, c2,
-                          P{fx_.cloud[0] - 0.05f, fx_.cloud[1] - 0.05f, fx_.cloud[2] - 0.05f, fx_.cloudB, Blend::Alpha},
-                          sc, sc, 0.5f, float(fx_.cloudScroll));
+        drawClouds(vp);
     } else if (fog) {
         renderer.drawDome(cam, vp, nullptr, P{0.25f, 0.25f, 0.25f, 1, Blend::Opaque}, 1, 1, 0, 0);
         const RendererTexture* c = repeating("clouds1.tga", "sky_def.tga");
@@ -238,6 +231,24 @@ void Engine::drawNodeScene(const View& v, const Viewport& vp) {
         renderer.drawDome(cam, vp, nullptr, P{r, g, b, a, blend}, 1, 1, 0, 0);
     };
     applyLighting(overlay, wash);
+}
+
+void Engine::drawClouds(const Viewport& vp) {
+    using P = Renderer::Pass;
+    auto repeating = [&](const std::string& name) {
+        const RendererTexture* t = renderer.optionalTexture(res, name);
+        if (!t) t = renderer.optionalTexture(res, "sky_def.tga");
+        if (t) renderer.setRepeat(*t);
+        return t;
+    };
+    const RendererTexture* c1 = repeating("clouds1.tga");
+    const RendererTexture* c2 = repeating("clouds2.tga");
+    const float sc = 4;
+    renderer.drawDome(cam, vp, c1, P{fx_.cloud[0], fx_.cloud[1], fx_.cloud[2], fx_.cloudA, Blend::Alpha}, sc, sc, 0,
+                      float(fx_.cloudScroll));
+    renderer.drawDome(cam, vp, c2,
+                      P{fx_.cloud[0] - 0.05f, fx_.cloud[1] - 0.05f, fx_.cloud[2] - 0.05f, fx_.cloudB, Blend::Alpha},
+                      sc, sc, 0.5f, float(fx_.cloudScroll));
 }
 
 // Lighting overlays shared by nodes and zooms (0x409b50).

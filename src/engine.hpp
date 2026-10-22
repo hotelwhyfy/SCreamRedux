@@ -44,6 +44,7 @@ struct Options {
 
 class Engine {
 public:
+    bool release2006 = false;  // the 2006 game script (Lua 5.0); set before the scripts run
     using Value = std::variant<double, std::string>;
 
     explicit Engine(Options opts);
@@ -68,7 +69,6 @@ public:
         std::vector<std::string> newGame;     // callbacks, one per selectable game
         std::map<int, std::string> extra;     // scMenuSetEx
         bool saveFunc = false;
-        std::string font;
     } menu;
 
     std::map<int, std::string> hints;  // scHintsSet
@@ -159,6 +159,7 @@ public:
     // Debug input for --exec: move the pointer (canvas units) and press a button.
     void debugMouse(float x, float y);
     void debugPress(int button);
+    void debugMenu(int mode);  // open the menu at once in a mode (0 main, 1 load, 2 save, 4 setup)
     void debugUseHeld(Object* o) { useHeldOn(o); }
     void hotkey(int vk);  // 0x4175b0, keyed by Windows virtual-key codes (also debugKey)
     void addTimer(double seconds, const std::string& fn, bool global);
@@ -211,31 +212,36 @@ private:
     static constexpr int kQuickSlot = 11;  // F5/F7 (the original's scream.011)
     void drawGamma();
     double gameClock_ = 0;
+    double textClock_ = 0;  // feedback timing; unlike the game clock it runs on in the menu
 
-    // Main menu (menu.cpp).
-    enum class Screen { None, Main, ChooseGame, Confirm, Setup, Load, Save, Message };
+    // Main menu (menu.cpp). The modes are the original's (menu struct +0x260).
+    enum class Screen { None = -1, Main = 0, Load = 1, Save = 2, Setup = 4 };
     Screen menu_ = Screen::None;
-    Screen afterMessage_ = Screen::None;
-    std::string prompt_;
-    std::function<void()> onYes_;
-    double messageUntil_ = 0;
+    // The "black" zoom shown for a while when the menu opens (1 s) or closes (2 s).
+    double menuBlackUntil_ = 0;
+    bool menuClosing_ = false;
+    std::function<void()> afterMenu_;  // what closing the menu leads to, run once it is closed
+    // Prompt list (0x412fa0): the click that asked, its lines (first added at the bottom).
+    int promptHit_ = -1;
+    std::vector<std::string> promptLines_;
     bool menuPending_ = false;   // open the menu once the intro handler finishes
-    std::function<void()> deferred_;  // state-replacing menu actions run between frames
     bool quitWhenIdle_ = false;  // quitting: let the outro handler finish first
-    Font menuFont_;
     bool menuOpen() const { return menu_ != Screen::None; }
-    void closeMenu();
-    void showMessage(const std::string& text, Screen after);
-    void confirm(const std::string& question, std::function<void()> yes);
+    void closeMenu(std::function<void()> then = {});
+    void updateMenu();
     void startNewGame(int index);
     void quitGame();
     void menuClick();
-    void menuBack();
+    void menuAction(int hit, int answer);
+    void ask(int hit, std::vector<std::string> lines);
+    int menuHit(float x, float y) const;
+    int promptRow(float y) const;
+    bool slotExists(int file) const;
+    void readMenuSlots();
+    std::array<std::string, 11> menuSlots_;  // row texts; row 0 is the quicksave
+    bool slideshow_ = false;  // 0x4df8ddc, the setup menu's slideshow mode (not ported)
     void drawMenu();
-    std::vector<std::string> menuButtons() const;
-    std::vector<std::string> menuLines() const;
-    int menuLineAt(float x, float y) const;
-    int menuButtonAt(float x, float y) const;
+    void drawMenuBackground();
     void loadUserSettings();
     void saveUserSettings();
     // A game handler is running (input waits). The --exec driver doesn't count.
@@ -278,10 +284,18 @@ private:
     void updateEffects(double dt);
     std::array<const RendererTexture*, 6> faceMasks(const View& v);
     void drawNodeScene(const View& v, const Viewport& vp);
+    void drawClouds(const Viewport& vp);  // the two crossfading cloud layers (0x40d990)
     void applyLighting(const std::function<void(float, float, float, float, Blend)>& overlay,
-                       const std::function<void(float, float, float, float, Blend)>& wash);    Object* hovered(int& edge);
+                       const std::function<void(float, float, float, float, Blend)>& wash);
+    Object* hovered(int& edge);
     Viewport nodeViewport() const;
     void panCamera(double dt);
+    // Alternate control (SC_FPS_STYLE, 0x4df8e10): the view follows the mouse's
+    // offset from the screen centre, the pointer springs back to the centre.
+    bool fpsStyle() const;
+    bool fpsActive() const;  // in a panorama, where it applies
+    void fpsCamera(double dt);
+    void recenterPointer(bool now);
     void drawCursor(Object* hover, int edge);
     // Where a zoom image is drawn on the 800x600 canvas. Hotspots are authored
     // in a logical 800x472 space spanning the whole image, whatever its pixel

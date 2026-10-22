@@ -1,10 +1,15 @@
-// Main menu: new game (choosing between the two games), setup, load, save,
-// quit, and back to the game. Uses the game's menu images (scMenuSet), menu
-// music and background (scMenuSetEx) and the wording found in scream.exe
-// ("Which game do you want to play?", "Replace saved game?", ...). The exact
-// on-screen layout of the original isn't recovered yet, so this one is ours.
-
-#include <SDL3/SDL_log.h>
+// Main menu, as scream.exe draws and drives it: renderer 0x408550 (called
+// from the main loop 0x416a10 in state 0xfa5), hit test 0x417c90, click and
+// hover handler 0x413640, prompt list 0x412fa0 / 0x40b250 / 0x413e70, open
+// 0x412cb0, close 0x4130d0. Layout in pixels of the original's 1024x768 mode
+// (top-down here; the original's GL y runs up), drawn on our canvas at kPx.
+//
+// Modes (menu struct +0x260): 0 main, 1 load, 2 save, 4 setup. The renderer
+// also takes -1 (main without "back": no game running) and 3 (load with the
+// quicksave row, when scream.011 exists). The menu images (scMenuSet: logo,
+// back, new, set, load, save, quit) sit in square textures, 512 for the logo
+// and 128 for the rest, which the quads stretch whole; an image fills the
+// top-left of its texture, so it shows at the quad's scale.
 
 #include <fstream>
 
@@ -13,12 +18,17 @@
 
 namespace {
 
-constexpr int kSlots = 8;
-constexpr float kButtonW = 128, kButtonH = 64, kButtonY = 470;
-constexpr float kTextScale = 0.8f, kLinesTop = 250;
+constexpr int W = Engine::kOrigW, H = Engine::kOrigH;
+constexpr float kPx = float(sc::SCREEN_W) / W;
+constexpr int kFiles = 10;  // scream.001-010; scream.011 (F5) shows as row 0
+enum { kLogo, kBack, kNew, kSet, kLoad, kSave, kQuit };
 
-const char* speedName(double v) { return v < 40 ? "SLOW" : v > 60 ? "FAST" : "NORMAL"; }
-double nextSpeed(double v) { return v < 40 ? 50 : v > 60 ? 25 : 75; }
+// Setup items (0x408550 jump table 0x408520), label then value, 29 characters.
+const char* const kSetupLabels[] = {"hints                ", "surround music       ", "camera speed         ",
+                                    "text speed           ", "gamma correction     ", "slideshow mode       ",
+                                    "alternate control    "};
+
+const char* speedName(double v) { return v == 25 ? "    SLOW" : v == 50 ? "  NORMAL" : v == 75 ? "    FAST" : ""; }
 
 double settingNum(const std::map<int, Engine::Value>& s, int key, double def) {
     auto it = s.find(key);
@@ -27,251 +37,390 @@ double settingNum(const std::map<int, Engine::Value>& s, int key, double def) {
 
 }  // namespace
 
+// 0x412cb0: the game is captured, the "black" zoom shows for scSleep(1), then
+// the menu fades in from it (updateMenu) and its music starts.
 void Engine::openMenu() {
     if (menuOpen())
         return;
-    beginTransition();  // 0x412cb0
+    beginTransition();
     menuShown_ = true;  // 0x4131c0
     menu_ = Screen::Main;
+    promptHit_ = -1;
+    menuClosing_ = false;
+    menuBlackUntil_ = realTime() + (opts.turbo ? 0 : 1);  // turbo (test runs): no interlude
     invOpen_ = journalOpen_ = false;
     sound.pauseGame(true);
-    if (auto it = menu.extra.find(sc::STEREO); it != menu.extra.end())
-        sound.playMenuMusic(it->second);
+    readMenuSlots();
 }
 
-void Engine::closeMenu() {
+// 0x4130d0: the menu music fades, the "black" zoom shows for scSleep(2), then
+// the game (or whatever `then` starts) fades in from it.
+void Engine::closeMenu(std::function<void()> then) {
+    if (!menuOpen() || menuClosing_) {
+        if (then) then();
+        return;
+    }
     beginTransition();
-    menu_ = Screen::None;
     sound.stopMenuMusic();
+    promptHit_ = -1;
+    menuClosing_ = true;
+    menuBlackUntil_ = realTime() + (opts.turbo ? 0 : 2);
+    afterMenu_ = std::move(then);
+}
+
+// End of the black interlude: scSwitch(SC_ZOOMOUT) crossfades out of it.
+void Engine::updateMenu() {
+    if (menuBlackUntil_ == 0 || realTime() < menuBlackUntil_)
+        return;
+    menuBlackUntil_ = 0;
+    beginTransition();
+    if (!menuClosing_) {
+        if (auto it = menu.extra.find(sc::STEREO); it != menu.extra.end())
+            sound.playMenuMusic(it->second);
+        return;
+    }
+    menuClosing_ = false;
+    menu_ = Screen::None;
     sound.pauseGame(false);
+    if (fpsStyle()) recenterPointer(true);  // 0x4136fc
+    auto then = std::move(afterMenu_);
+    afterMenu_ = nullptr;
+    if (then) then();
 }
 
-void Engine::showMessage(const std::string& text, Screen after) {
-    prompt_ = text;
-    menu_ = Screen::Message;
-    afterMessage_ = after;
-    messageUntil_ = realTime() + 1.5;
-}
-
-void Engine::confirm(const std::string& question, std::function<void()> yes) {
-    prompt_ = question;
-    onYes_ = std::move(yes);
-    menu_ = Screen::Confirm;
+void Engine::debugMenu(int mode) {
+    if (!menuOpen()) {
+        menuShown_ = true;
+        sound.pauseGame(true);
+    }
+    menu_ = mode == 1 ? Screen::Load : mode == 2 ? Screen::Save : mode == 4 ? Screen::Setup : Screen::Main;
+    menuBlackUntil_ = 0;
+    menuClosing_ = false;
+    promptHit_ = -1;
+    readMenuSlots();
 }
 
 void Engine::startNewGame(int index) {
     if (index < 0 || index >= int(menu.newGame.size()))
         return;
-    closeMenu();
-    restoreState(baseline_);
-    currentGame_ = index;
-    gameRunning_ = true;
-    aborted_ = false;
-    cam.yaw = cam.pitch = 0;
-    script.start(menu.newGame[size_t(index)]);
+    closeMenu([this, index] {
+        restoreState(baseline_);
+        currentGame_ = index;
+        gameRunning_ = true;
+        aborted_ = false;
+        cam.yaw = cam.pitch = 0;
+        script.start(menu.newGame[size_t(index)]);
+    });
 }
 
 void Engine::quitGame() {
-    closeMenu();
-    sound.stopAll();
-    // scMenuSetEx(SC_OUTRO, fn) names the credits handler played on the way out.
-    auto it = menu.extra.find(sc::OUTRO);
-    if (it != menu.extra.end() && script.start(it->second))
-        quitWhenIdle_ = true;
-    else
-        quit_ = true;
+    closeMenu([this] {
+        sound.stopAll();
+        // scMenuSetEx(SC_OUTRO, fn) names the credits handler played on the way out.
+        auto it = menu.extra.find(sc::OUTRO);
+        if (it != menu.extra.end() && script.start(it->second))
+            quitWhenIdle_ = true;
+        else
+            quit_ = true;
+    });
 }
 
-std::vector<std::string> Engine::menuButtons() const {
-    std::vector<std::string> b = {"new", "set", "load"};
-    if (gameRunning_) b.push_back("save");
-    b.push_back("quit");
-    if (gameRunning_) b.push_back("back");
-    return b;
-}
-
-// Text lines of the current sub-screen; the last one is the way back where there is one.
-std::vector<std::string> Engine::menuLines() const {
-    switch (menu_) {
-    case Screen::ChooseGame:
-        return {"Scratches: Director's Cut", "Scratches: The Last Visit", "back"};
-    case Screen::Confirm:
-        return {"yes", "no"};
-    case Screen::Setup: {
-        auto onOff = [&](int key) { return settingNum(settings, key, 0) != 0 ? std::string("ON") : std::string("OFF"); };
-        return {"hints  " + onOff(sc::HINTS),
-                std::string("camera speed  ") + speedName(settingNum(settings, sc::CAM_SPEED, 50)),
-                std::string("text speed  ") + speedName(settingNum(settings, sc::TXT_SPEED, 50)),
-                "back"};
-    }
-    case Screen::Load:
-    case Screen::Save: {
-        std::vector<std::string> lines;
-        for (int i = 0; i < kSlots; ++i) {
-            std::string d = slotDescription(i);
-            lines.push_back(std::to_string(i + 1) + ".  " + (d.empty() ? "----" : d));
-        }
-        lines.push_back("back");
-        return lines;
-    }
-    default:
-        return {};
+// The slot texts, read when the menu opens (0x412cb0) and after a save:
+// "N. description" for file N, row 0 for the quicksave; empty rows draw nothing.
+void Engine::readMenuSlots() {
+    for (int i = 0; i <= kFiles; ++i) {
+        std::string d = slotDescription(i == 0 ? kQuickSlot : i);
+        menuSlots_[size_t(i)] = d.empty() ? std::string() : std::to_string(i) + ". " + d;
     }
 }
 
-int Engine::menuLineAt(float x, float y) const {
-    float lh = menuFont_.lineHeight(kTextScale) * 1.2f;
-    int i = int((y - kLinesTop) / lh);
-    int n = int(menuLines().size());
-    return y >= kLinesTop && i < n && x > 40 && x < sc::SCREEN_W - 40 ? i : -1;
-}
+bool Engine::slotExists(int file) const { return !menuSlots_[size_t(file == kQuickSlot ? 0 : file)].empty(); }
 
-int Engine::menuButtonAt(float x, float y) const {
-    auto buttons = menuButtons();
-    float total = float(buttons.size()) * kButtonW;
-    float left = (sc::SCREEN_W - total) / 2;
-    if (y < kButtonY || y >= kButtonY + kButtonH || x < left || x >= left + total)
-        return -1;
-    return int((x - left) / kButtonW);
-}
-
-void Engine::menuBack() {
+// 0x417c90 in the menu state. Returns 0 back, 1 new, 2 setup, 3 load, 4 save,
+// 5 quit, 6 + row for list/setup rows (16 - n for the n-th row from the
+// bottom, 16 px apart, 6 px below the text), -1 for nothing.
+int Engine::menuHit(float cx, float cy) const {
+    const int x = int(cx / kPx), y = int(cy / kPx);
     if (menu_ == Screen::Main) {
-        if (gameRunning_) closeMenu();
-    } else if (menu_ != Screen::Message) {
-        menu_ = Screen::Main;
+        if (x < W / 2 - 64 || x > W / 2 + 64)
+            return -1;
+        for (int e = 1; e <= 6; ++e)  // 36 px apart, quit at the bottom
+            if (y >= H - 108 - 36 * (e - 1) && y <= H - 72 - 36 * (e - 1))
+                return 6 - e;
+        return -1;
     }
+    if (x >= W / 2 - 256 && x <= W / 2 + 256)
+        for (int e = 0; e <= kFiles; ++e) {
+            if (y < H - 126 - 16 * e || y > H - 110 - 16 * e)
+                continue;
+            // Loading only takes rows with a saved game (the top one is the quicksave).
+            if (menu_ != Screen::Load || slotExists(e == kFiles ? kQuickSlot : kFiles - e))
+                return 16 - e;
+        }
+    if (x >= W / 2 - 64 && x <= W / 2 + 64 && y >= H - 105 && y <= H - 70)
+        return 0;
+    return -1;
+}
+
+// Prompt rows (0x417c90, state 0xfa7 over the menu): 1 for the line second
+// from the bottom (yes / Director's Cut), 2 for the bottom one (no / The Last Visit).
+int Engine::promptRow(float cy) const {
+    const int y = int(cy / kPx);
+    if (y >= H - 32 && y <= H - 16) return 1;
+    if (y >= H - 16 && y <= H) return 2;
+    return 0;
+}
+
+// 0x412fa0, first call: the lines go in bottom-up, the question last (on top).
+void Engine::ask(int hit, std::vector<std::string> lines) {
+    clearFeedback();
+    promptHit_ = hit;
+    promptLines_ = std::move(lines);
 }
 
 void Engine::menuClick() {
+    if (menuBlackUntil_ > 0)
+        return;
     float x, y;
     canvasMouse(x, y);
-    switch (menu_) {
-    case Screen::Main: {
-        int b = menuButtonAt(x, y);
-        if (b < 0) return;
-        const std::string name = menuButtons()[size_t(b)];
-        if (name == "new") {
-            if (gameRunning_) confirm("Start a new game?", [this] { menu_ = Screen::ChooseGame; });
-            else menu_ = Screen::ChooseGame;
-        } else if (name == "set") {
-            menu_ = Screen::Setup;
-        } else if (name == "load") {
-            menu_ = Screen::Load;
-        } else if (name == "save") {
+    if (promptHit_ >= 0) {  // 0x413e70: the answer re-runs the click that asked
+        int row = promptRow(y);
+        if (row == 0)
+            return;
+        int hit = promptHit_;
+        promptHit_ = -1;
+        promptLines_.clear();
+        menuAction(hit, row);
+        return;
+    }
+    int hit = menuHit(x, y);
+    if (hit >= 0)
+        menuAction(hit, 0);
+}
+
+// 0x413640's click branch (jump table 0x4135c8). `answer` is 0 on the click
+// itself, else the prompt row picked (1 yes, 2 no).
+void Engine::menuAction(int hit, int answer) {
+    switch (hit) {
+    case 0:  // back
+        if (menu_ == Screen::Main) {
+            if (gameRunning_) closeMenu();
+        } else {
+            beginTransition();
+            menu_ = Screen::Main;
+        }
+        return;
+    case 1:  // new
+        if (gameRunning_) {
+            if (answer == 0) {
+                ask(1, {"no", "yes", "Start a new game?"});
+            } else if (answer == 1) {
+                gameRunning_ = false;  // no way back: the game must be picked now
+                ask(1, {"Scratches: The Last Visit", "Scratches: Director's Cut", "Which game do you want to play?"});
+            }
+        } else if (answer == 0) {
+            ask(1, {"Scratches: The Last Visit", "Scratches: Director's Cut", "Which game do you want to play?"});
+        } else {
+            startNewGame(answer == 1 ? 0 : 1);  // scMenuSet's first game function, or its second
+        }
+        return;
+    case 2:  // setup
+        beginTransition();
+        menu_ = Screen::Setup;
+        return;
+    case 3:  // load, when there is something to load
+        for (int f = 1; f <= kFiles + 1; ++f)
+            if (slotExists(f)) {
+                beginTransition();
+                menu_ = Screen::Load;
+                return;
+            }
+        return;
+    case 4:  // save, during a game
+        if (gameRunning_) {
+            beginTransition();
             menu_ = Screen::Save;
-        } else if (name == "quit") {
-            confirm("Quit the game?", [this] { quitGame(); });
-        } else if (name == "back") {
-            closeMenu();
         }
         return;
-    }
-    case Screen::ChooseGame: {
-        int i = menuLineAt(x, y);
-        if (i == 2) menu_ = Screen::Main;
-        else if (i >= 0) deferred_ = [this, i] { startNewGame(i); };
+    case 5:  // quit
+        if (answer == 0) ask(5, {"no", "yes", "Quit the game?"});
+        else if (answer == 1) quitGame();
         return;
+    default: break;
     }
-    case Screen::Confirm: {
-        int i = menuLineAt(x, y);
-        if (i == 0) {
-            menu_ = Screen::Main;
-            auto yes = std::move(onYes_);
-            yes();
-        } else if (i == 1) {
-            menu_ = Screen::Main;
+
+    if (menu_ == Screen::Load) {
+        if (gameRunning_ && answer == 0)
+            return ask(hit, {"no", "yes", "Load a saved game?"});
+        if (gameRunning_ && answer != 1)
+            return;
+        const int file = hit == 6 ? kQuickSlot : hit - 6;
+        menu_ = Screen::Main;
+        closeMenu([this, file] {
+            if (loadSlot(file)) {
+                gameRunning_ = true;
+                feedback("Game loaded");
+            } else {
+                feedback("Could not load game!");
+            }
+        });
+    } else if (menu_ == Screen::Save) {
+        if (hit == 6)
+            return;  // the quicksave row isn't for the menu
+        const int file = hit - 6;
+        if (slotExists(file) && answer == 0)
+            return ask(hit, {"no", "yes", "Replace saved game?"});
+        if (answer > 1)
+            return;
+        menu_ = Screen::Main;
+        closeMenu([this, file] {
+            feedback(saveSlot(file) ? "Game saved" : "Could not save game!");
+            readMenuSlots();
+        });
+    } else if (menu_ == Screen::Setup) {
+        // 0x413620: the first five go through the key handler (F1, F2, F9, F10, F12).
+        static const int keys[] = {0x70, 0x71, 0x78, 0x79, 0x7b};
+        const int item = hit - 6;
+        if (item < 5) {
+            hotkey(keys[item]);
+        } else if (item == 5) {
+            // Slideshow mode (0x4df8ddc): stepwise camera turns; not ported beyond the switch.
+            slideshow_ = !slideshow_;
+            feedback(slideshow_ ? "slideshow mode ON" : "slideshow mode OFF");
+        } else if (item == 6) {
+            // Alternate control (0x4df8e10, SC_FPS_STYLE): the view follows the mouse (Engine::fpsCamera).
+            bool on = settingNum(settings, sc::FPS_STYLE, 0) == 0;
+            settings[sc::FPS_STYLE] = on ? 1.0 : 0.0;
+            saveUserSettings();  // our addition: the original forgets it
+            feedback(on ? "alternate control ENABLED" : "alternate control DISABLED");
         }
-        return;
-    }
-    case Screen::Setup: {
-        int i = menuLineAt(x, y);
-        if (i == 0) settings[sc::HINTS] = settingNum(settings, sc::HINTS, 1) != 0 ? 0.0 : 1.0;
-        else if (i == 1) settings[sc::CAM_SPEED] = nextSpeed(settingNum(settings, sc::CAM_SPEED, 50));
-        else if (i == 2) settings[sc::TXT_SPEED] = nextSpeed(settingNum(settings, sc::TXT_SPEED, 50));
-        else if (i == 3) menu_ = Screen::Main;
-        if (i >= 0 && i < 3) saveUserSettings();
-        return;
-    }
-    case Screen::Load:
-    case Screen::Save: {
-        int i = menuLineAt(x, y);
-        if (i == kSlots) {
-            menu_ = Screen::Main;
-        } else if (i >= 0 && menu_ == Screen::Save) {
-            auto doSave = [this, i] {
-                showMessage(saveSlot(i) ? "Game saved" : "Could not save game!", Screen::Main);
-            };
-            if (slotDescription(i).empty()) doSave();
-            else confirm("Replace saved game?", doSave);
-        } else if (i >= 0 && !slotDescription(i).empty()) {
-            auto doLoad = [this, i] { deferred_ = [this, i] {
-                if (loadSlot(i)) {
-                    gameRunning_ = true;
-                    showMessage("Game loaded", Screen::None);
-                } else {
-                    showMessage("Could not load game!", Screen::Main);
-                }
-            }; };
-            if (gameRunning_) confirm("Load a saved game?", doLoad);
-            else doLoad();
-        }
-        return;
-    }
-    default:
-        return;
+        // Item 7, an undrawn row, switches the script's "language" global; not ported.
     }
 }
 
+// The menu background (0x4083c0, scMenuSetEx(SC_IMAGE)): the image added
+// (ONE, ONE), the sky's cloud layers (0x40d990) over it, then the image
+// again with its alpha, so the clouds drift behind the house. It covers the
+// view area of the 1024x768 mode.
+void Engine::drawMenuBackground() {
+    auto it = menu.extra.find(sc::IMAGE);
+    if (it == menu.extra.end())
+        return;
+    auto* t = renderer.texture(res, it->second);
+    if (!t)
+        return;
+    const float y = 64 * kPx, h = (H - 128) * kPx;
+    renderer.drawImageUV(*t, 0, y, sc::SCREEN_W, h, 0, 0, 1, 1, 1, 1, 1, 1, Blend::AddOne);
+    drawClouds(nodeViewport());
+    renderer.drawImage(*t, 0, y, sc::SCREEN_W, h);
+}
+
 void Engine::drawMenu() {
-    if (!menuFont_.loaded() || menuFont_.name() != menu.font)
-        menuFont_.load(renderer, res, menu.font.empty() ? std::string("font_def.tga") : menu.font);
-
-    if (auto it = menu.extra.find(sc::IMAGE); it != menu.extra.end())
-        if (auto* t = renderer.texture(res, it->second))
-            renderer.drawImage(*t, 0, (sc::SCREEN_H - 472) / 2.0f, sc::SCREEN_W, 472);
-    float mx, my;
-    canvasMouse(mx, my);
-
-    if (menu_ == Screen::Main) {
-        if (!menu.images.empty())
-            if (auto* t = renderer.texture(res, menu.images[0]))
-                renderer.drawImage(*t, (sc::SCREEN_W - 512) / 2.0f, 70, 512, 256);
-        auto buttons = menuButtons();
-        float left = (sc::SCREEN_W - float(buttons.size()) * kButtonW) / 2;
-        int hover = menuButtonAt(mx, my);
-        // Images, in scMenuSet order: logo, back, new, set, load, save, quit.
-        static const std::map<std::string, int> imageIndex = {
-            {"back", 1}, {"new", 2}, {"set", 3}, {"load", 4}, {"save", 5}, {"quit", 6}};
-        for (size_t i = 0; i < buttons.size(); ++i) {
-            size_t img = size_t(imageIndex.at(buttons[i]));
-            if (img < menu.images.size())
-                if (auto* t = renderer.texture(res, menu.images[img]))
-                    renderer.drawImage(*t, left + float(i) * kButtonW, kButtonY, kButtonW, kButtonH,
-                                       int(i) == hover ? 1.0f : 0.65f);
-        }
+    ensureFont();  // the text uses the current scFont (texture 0x18), not one of the menu's own
+    if (menuBlackUntil_ > 0) {  // the "black" zoom
+        drawTransition();
+        if (font_.loaded()) drawFeedback();
         return;
     }
+    drawMenuBackground();
 
-    renderer.drawRect(0, 64, sc::SCREEN_W, sc::SCREEN_H - 128, 0, 0, 0, 0.55f);
-    if (!menuFont_.loaded())
+    auto image = [&](int i) -> const Renderer::Texture* {
+        return size_t(i) < menu.images.size() ? renderer.texture(res, menu.images[size_t(i)]) : nullptr;
+    };
+    // A quad of qw x qh pixels over a size x size texture: the image is its top-left part.
+    auto quad = [&](const Renderer::Texture* t, int x, int y, int qw, int qh, int size, float r, float g, float b,
+                    float a, Blend blend) {
+        if (t)
+            renderer.drawImageUV(*t, float(x) * kPx, float(y) * kPx, float(qw * t->width / size) * kPx,
+                                 float(qh * t->height / size) * kPx, 0, 0, 1, 1, a, r, g, b, blend);
+    };
+    auto plain = [&](const Renderer::Texture* t, int x, int y, int qw, int qh, int size) {
+        quad(t, x, y, qw, qh, size, 1, 1, 1, 1, Blend::Alpha);
+    };
+    auto glow = [&](const Renderer::Texture* t, int x, int y, int qw, int qh, int size) {  // hover
+        quad(t, x, y, qw, qh, size, 0, 1, 1, 0.5f, Blend::AddAlpha);
+    };
+    auto text = [&](const std::string& s, int x, int y, bool hover) {
+        if (!font_.loaded()) return;
+        font_.drawMono(renderer, s, float(x) * kPx, float(y) * kPx, kPx);
+        if (hover) font_.drawMono(renderer, s, float(x) * kPx, float(y) * kPx, kPx, 0.5f, {0, 1, 1}, Blend::AddAlpha);
+    };
+
+    float mx, my;
+    canvasMouse(mx, my);
+    const int hover = promptHit_ >= 0 ? promptHit_ : menuHit(mx, my);
+
+    // The logo, in every mode: centred, its top 420 px above the middle (92 at 768).
+    if (auto* logo = image(kLogo))
+        plain(logo, W / 2 - 256 + (512 - logo->width) / 2, H / 2 - 420 + (512 - logo->height) / 2, 512, 512, 512);
+
+    // Everything else is placed by the "new" image's size: 128x64 gives dx 0, dy 136.
+    const auto* fresh = image(kNew);
+    const int dx = (128 - (fresh ? fresh->width : 128)) / 2, dy = (112 - (fresh ? fresh->height : 64)) / 2 + 112;
+
+    if (menu_ == Screen::Main) {
+        // Back, new, setup, load, save, quit stacked 36 px apart, 112x120 quads
+        // (so 112x60 for the 128x64 images); back only during a game.
+        bool anySave = false;
+        for (int f = 1; f <= kFiles + 1; ++f) anySave = anySave || slotExists(f);
+        for (int k = gameRunning_ ? 0 : 1; k <= 5; ++k) {
+            const bool disabled = (k == 3 && !anySave) || (k == 4 && !gameRunning_);
+            const int x = W / 2 - 56 + dx, y = H / 2 - 64 + dy + 36 * k;
+            const float c = disabled ? 0.5f : 1.0f;
+            quad(image(kBack + k), x, y, 112, 120, 128, c, c, c, 1, Blend::Alpha);
+            if (hover == k && !disabled)
+                glow(image(kBack + k), x, y, 112, 120, 128);
+        }
+    } else {
+        // Title image 96x96 (96x48 shown), the rows, and back below them.
+        const int title = menu_ == Screen::Save ? kSave : menu_ == Screen::Setup ? kSet : kLoad;
+        plain(image(title), W / 2 - 48 + dx, H / 2 - 108 + dy, 96, 96, 128);
+        if (menu_ == Screen::Setup) {
+            for (int k = 0; k < 7; ++k) {
+                std::string v;
+                switch (k) {
+                case 0: v = hintsOn() ? "      ON" : "     OFF"; break;
+                case 1: v = settingNum(settings, sc::SURROUND, 0) != 0 ? "      ON" : "     OFF"; break;
+                case 2: v = speedName(settingNum(settings, sc::CAM_SPEED, 50)); break;
+                case 3: v = speedName(settingNum(settings, sc::TXT_SPEED, 50)); break;
+                case 4: v = gamma_ == 1 ? "     LOW" : gamma_ == 2 ? "  MEDIUM" : gamma_ == 3 ? "    HIGH" : "DISABLED"; break;
+                case 5: v = slideshow_ ? "      ON" : "     OFF"; break;
+                case 6: v = settingNum(settings, sc::FPS_STYLE, 0) != 0 ? " ENABLED" : "DISABLED"; break;
+                }
+                text(kSetupLabels[k] + v, W / 2 - 145, H - 276 + 16 * k, hover == 6 + k);
+            }
+        } else {
+            // Rows 1-10 are the files; row 0, the quicksave, only when loading and there is one (mode 3).
+            const bool quick = menu_ == Screen::Load && slotExists(kQuickSlot);
+            for (int i = quick ? 0 : 1; i <= kFiles; ++i)
+                text(menuSlots_[size_t(i)], W / 2 - 120, H - 276 + 16 * i, hover == 6 + i);
+        }
+        const int y = H / 2 + (menu_ == Screen::Setup ? 116 : 126) + dy;
+        plain(image(kBack), W / 2 - 64 + dx, y, 128, 128, 128);
+        if (hover == 0)
+            glow(image(kBack), W / 2 - 64 + dx, y, 128, 128, 128);
+    }
+    drawGamma();
+    drawTransition();
+
+    if (!font_.loaded())
         return;
-    std::string title = menu_ == Screen::ChooseGame ? "Which game do you want to play?"
-                      : menu_ == Screen::Setup     ? "Setup"
-                      : menu_ == Screen::Load      ? "Load a saved game"
-                      : menu_ == Screen::Save      ? "Save the game"
-                                                   : prompt_;
-    float tw = menuFont_.width(title, kTextScale);
-    menuFont_.draw(renderer, title, (sc::SCREEN_W - tw) / 2, 160, kTextScale);
-    if (menu_ == Screen::Message)
+    if (promptHit_ < 0) {
+        drawFeedback();  // e.g. the setup items' "hints ON"
         return;
-    auto lines = menuLines();
-    int hover = menuLineAt(mx, my);
-    float lh = menuFont_.lineHeight(kTextScale) * 1.2f;
-    for (size_t i = 0; i < lines.size(); ++i) {
-        float w = menuFont_.width(lines[i], kTextScale);
-        menuFont_.draw(renderer, lines[i], (sc::SCREEN_W - w) / 2, kLinesTop + lh * float(i), kTextScale,
-                       int(i) == hover ? 1.0f : 0.6f);
+    }
+    // The prompt list (0x40b250 with EAX=1): centred, stacked up from the
+    // bottom 16 px apart, the question (last line) white, the others cyan.
+    const int n = int(promptLines_.size()), offset = n == 4 ? -8 : 8;
+    const int row = promptRow(my), lit = row == 1 ? 1 : row == 2 ? 0 : -1;
+    for (int i = 0; i < n; ++i) {
+        const std::string& s = promptLines_[size_t(i)];
+        const float x = float(W / 2 - int(s.size() / 2) * Font::kMonoAdvance - 4) * kPx;
+        const float y = float(H - offset - 16 * i) * kPx;
+        TextColor c = i == n - 1 ? TextColor{1, 1, 1} : TextColor{0.1f, 0.75f, 0.75f};
+        font_.drawMono(renderer, s, x, y, kPx, 1, c);
+        if (i == lit)
+            font_.drawMono(renderer, s, x, y, kPx, 1, {0.1f, 1, 1});
     }
 }
 
@@ -286,14 +435,14 @@ void Engine::loadUserSettings() {
             continue;
         }
         int k = std::atoi(key.c_str());
-        if (k == sc::HINTS || k == sc::CAM_SPEED || k == sc::TXT_SPEED || k == sc::SURROUND)
+        if (k == sc::HINTS || k == sc::CAM_SPEED || k == sc::TXT_SPEED || k == sc::SURROUND || k == sc::FPS_STYLE)
             settings[k] = value;
     }
 }
 
 void Engine::saveUserSettings() {
     std::ofstream out(saveDir() / "settings.cfg", std::ios::trunc);
-    for (int key : {sc::HINTS, sc::CAM_SPEED, sc::TXT_SPEED, sc::SURROUND})
+    for (int key : {sc::HINTS, sc::CAM_SPEED, sc::TXT_SPEED, sc::SURROUND, sc::FPS_STYLE})
         out << key << " " << settingNum(settings, key, 0) << "\n";
     out << "gamma " << gamma_ << "\n";
 }
