@@ -40,7 +40,8 @@ void usage() {
         "  --check           check the world the script builds (targets, handlers, files)\n"
         "  --turbo           fast-forward: no audio or video, game time runs 30x\n"
         "  --crawl           click every object, use every item reaction, run every choice\n"
-        "                    and dialogue from the start state; report warnings and errors\n");
+        "                    and dialogue from the start state; report warnings and errors\n"
+        "  --explore         with --game: play automatically until stuck or finished\n");
 }
 
 // Decode every image, sound and video once; report anything that fails.
@@ -137,6 +138,7 @@ int main(int argc, char** argv) {
         else if (a == "--check") opts.check = true;
         else if (a == "--turbo") opts.turbo = true;
         else if (a == "--crawl") opts.crawl = opts.turbo = true;
+        else if (a == "--explore") opts.explore = opts.turbo = true;
         else if (a == "-h" || a == "--help") { usage(); return 0; }
         else { std::fprintf(stderr, "unknown option %s\n", a.c_str()); usage(); return 2; }
     }

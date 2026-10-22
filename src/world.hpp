@@ -143,6 +143,10 @@ public:
     void bindClicked(Room* room, View* view, Object* object);
 
     Room* room(const std::string& name);
+    // Zooms are found by name across all rooms, first created first (0x403fd0),
+    // unlike nodes, which are looked up in the bound room.
+    View* zoom(const std::string& name) const;
+    std::vector<View*> zoomOrder;  // every zoom, in creation order
 
 private:
     std::vector<int> scopes_;

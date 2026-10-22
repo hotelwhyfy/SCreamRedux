@@ -173,17 +173,14 @@ bool Engine::switchNode(const std::string& name) {
 }
 
 bool Engine::switchZoom(const std::string& name) {
-    // Zooms usually live in the current room, but shared ones (e.g. "black")
-    // are defined once elsewhere, so fall back to a global search.
-    View* z = room ? room->zoom(name) : nullptr;
+    // Found by name across all rooms, the first created winning (0x403fd0).
+    View* z = world.zoom(name);
     // "black" is never created by the scripts: it is an engine built-in used
     // as a blank screen around cutscenes and scripted narration.
     if (!z && name == "black") {
         static View black = [] { View v; v.name = "black"; v.isZoom = true; return v; }();
         z = &black;
     }
-    for (auto it = world.rooms.begin(); !z && it != world.rooms.end(); ++it)
-        z = it->second->zoom(name);
     if (!z) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "no zoom %s", name.c_str());
         return false;
@@ -1171,6 +1168,8 @@ void Engine::run() {
         update(dt);
         if (opts.crawl && !crawlStep())
             quit_ = true;
+        if (opts.explore && !exploreStep())
+            quit_ = true;
 
         if (menuPending_ && !script.busy()) {
             menuPending_ = false;
@@ -1186,7 +1185,7 @@ void Engine::run() {
             execPending = false;
             script.startCode(opts.exec, "exec");
         }
-        if (!opts.crawl || crawlRender_) {
+        if (!(opts.crawl || opts.explore) || crawlRender_) {
             crawlRender_ = false;
             render();
         }

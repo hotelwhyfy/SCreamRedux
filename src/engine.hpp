@@ -37,6 +37,7 @@ struct Options {
     bool check = false;         // validate the built world, then exit (check.cpp)
     bool turbo = false;         // fast-forward for automated runs: no audio or video, fast clock
     bool crawl = false;         // visit every room/view/object and report problems (crawl.cpp)
+    bool explore = false;       // play the game automatically until stuck or finished (explore.cpp)
 };
 
 class Engine {
@@ -106,6 +107,9 @@ public:
     bool crawlStep();
     bool crawlRender_ = false;
     std::shared_ptr<struct Crawler> crawler_;  // shared_ptr: the type is only complete in crawl.cpp
+    // --explore (explore.cpp): one step per frame; false when stuck or finished.
+    bool exploreStep();
+    std::shared_ptr<struct Explorer> explorer_;
 
     // Where the player is.
     Room* room = nullptr;

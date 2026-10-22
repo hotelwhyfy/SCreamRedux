@@ -60,6 +60,8 @@ bool World::create(int kind, const std::string& name) {
         (kind == sc::NODE ? bound.node : bound.zoom) = p;
         bound.view = p;
         bound.objects.clear();
+        if (kind == sc::ZOOM)
+            zoomOrder.push_back(p);
         return true;
     }
     case sc::OBJECT: {
@@ -90,11 +92,17 @@ bool World::bind(int kind, const std::string& name) {
             return true;
         }
         return false;
-    case sc::NODE:
-    case sc::ZOOM: {
+    case sc::ZOOM:
+        if (View* z = zoom(name)) {
+            bound.zoom = bound.view = z;
+            bound.objects.clear();
+            return true;
+        }
+        return false;
+    case sc::NODE: {
         if (!bound.room)
             return false;
-        View* v = kind == sc::NODE ? bound.room->node(name) : bound.room->zoom(name);
+        View* v = bound.room->node(name);
         if (!v)
             return false;
         (kind == sc::NODE ? bound.node : bound.zoom) = v;
@@ -150,4 +158,11 @@ void World::bindClicked(Room* room, View* view, Object* object) {
     bound.view = view;
     (view && view->isZoom ? bound.zoom : bound.node) = view;
     bound.objects = view && object ? view->find(object->name) : std::vector<Object*>{};
+}
+
+View* World::zoom(const std::string& name) const {
+    for (View* z : zoomOrder)
+        if (z->name == name)
+            return z;
+    return nullptr;
 }

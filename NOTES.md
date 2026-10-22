@@ -167,12 +167,23 @@ Verified against the shipped scripts and data while building the engine (`src/`)
   (`scSwitch(SC_ZOOM, x)` then `scBind(SC_OBJECT, …)` / `scTextureUpdate(SC_ZOOM, …)`).
 - `scBind(SC_OBJECT, name)` searches the bound node in node state (4000), the bound zoom in
   zoom state (0xfa2), and finds nothing in any other state (inventory, journal, ...).
+- Nodes are found in the bound room, but zooms by name across all rooms, the first created
+  winning — for `scBind(SC_ZOOM)` and `scSwitch(SC_ZOOM)` alike. Duplicate zoom names: `phone`
+  / `phone-pick` (house-lobby and house-hall: the hall's version, with a clock hotspot, is
+  never shown), `bath1-pic2`, `lair-bucket` (identical copies).
 
 ### Crawl (`scream --crawl`)
 
 - 2638 tasks (every object click, scReaction, scInventoryReaction, choice option and dialogue,
   each from the start state, zooms reached through their parents) run clean apart from the two
   script bugs above. This found the binding rules above.
+
+### Explorer (`scream --game tlv|sdc --explore`)
+
+- An automated player limited to player actions (hotspot clicks, item use where a reaction
+  exists, dialogue options), retrying everything whenever the game state changes and learning
+  scripted doors/stairs as navigation. The Last Visit plays through to `finale_dc` (~550
+  actions, 50 states).
 
 ### Media
 
