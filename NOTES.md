@@ -145,6 +145,19 @@ Verified against the shipped scripts and data while building the engine (`src/`)
   callback runs as a new handler. **`scScriptGo`** plays a dialogue to completion.
 - Scripts pass nil for undefined names (`SC_HITNS` typo, `SC_STEREO_PATCH`); the API tolerates it.
 
+### Script checks (`scream --check`, `tools/check_script.py`)
+
+- The world the DC script builds is consistent: every click/reaction target, room handler,
+  choice handler and declared file exists, except 4 unreachable files (`hs-guest_pic6.jpg`,
+  `hs-lair_skeleton.jpg`, `hs-maid_photo5.jpg`, track `test`'s `trck-test.ogg`).
+- Handler literals all resolve, except two bugs in the original script, which raise Lua
+  errors at run time: `musicEnterCave_dc()` (undefined; only `musicEnterCave` exists) at the
+  end of the cellar-stairs handler, and `scTextureUpdate(SC_LEFT("hs-cellar_dc_n1l.jpg"), 0)`
+  in `createLiving_dc` (calls a number, so the handler stops there).
+- scream.exe runs handlers with `lua_pcall` (call-by-name `0x404d80`, `0x404e30`); a runtime
+  error is written to the log as "Runtime error" (only with logging on) and the game carries
+  on — the handler just stops. This port does the same.
+
 ### Media
 
 - Audio: Ogg Vorbis, 44.1 kHz (a few 48 kHz), mono/stereo; decoded with stb_vorbis into one

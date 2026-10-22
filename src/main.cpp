@@ -36,7 +36,8 @@ void usage() {
         "  --hotspots        draw clickable areas (SC_SHOW_HOTSPOTS)\n"
         "  --trace           log every sc* call\n"
         "  --api-status      print implementation status of all sc* functions\n"
-        "  --verify-media    decode every image, sound and video in the archives\n");
+        "  --verify-media    decode every image, sound and video in the archives\n"
+        "  --check           check the world the script builds (targets, handlers, files)\n");
 }
 
 // Decode every image, sound and video once; report anything that fails.
@@ -99,7 +100,9 @@ int run(const Options& opts, const std::string& script) {
     }
     // scream.sc defines the SC_* constants; the game script then builds the
     // world and calls scRun(), which only returns when the player quits.
-    return engine.script.runFile(boot) && engine.script.runFile(game) ? 0 : 1;
+    if (!engine.script.runFile(boot) || !engine.script.runFile(game))
+        return 1;
+    return opts.check && engine.checkResult_ ? 2 : 0;
 }
 
 }  // namespace
@@ -128,6 +131,7 @@ int main(int argc, char** argv) {
         else if (a == "--hotspots") opts.hotspots = true;
         else if (a == "--api-status") { printApiStatus(); return 0; }
         else if (a == "--verify-media") opts.verifyMedia = true;
+        else if (a == "--check") opts.check = true;
         else if (a == "-h" || a == "--help") { usage(); return 0; }
         else { std::fprintf(stderr, "unknown option %s\n", a.c_str()); usage(); return 2; }
     }

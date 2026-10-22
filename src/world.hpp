@@ -86,10 +86,7 @@ struct Choice {
     int lastSelected = -1;  // removed by scChoiceRemove
 };
 
-// SC_OVERLAY: an image drawn over the current view (scSwitch(SC_OVERLAY, name)).
-// scOverlay(a, b, c) fills three strings; scream.exe loads one texture from
-// them when switching. The shipped scripts never create overlays.
-// scOverlay(image, enterSound, leaveSound) (0x412a00 copies them to +0x34,
+// SC_OVERLAY (never created by the shipped scripts): scOverlay(image, enterSound, leaveSound) (0x412a00 copies them to +0x34,
 // +0x64, +0x94): the image covers the view; the first sound plays on
 // scSwitch(SC_OVERLAY), the second when a click dismisses it (0x414501).
 struct Overlay {

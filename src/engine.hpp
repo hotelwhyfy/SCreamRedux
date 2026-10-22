@@ -33,6 +33,7 @@ struct Options {
     bool hotspots = false;      // SC_SHOW_HOTSPOTS debug overlay
     bool windowed = true;
     bool verifyMedia = false;   // decode every asset and exit
+    bool check = false;         // validate the built world, then exit (check.cpp)
 };
 
 class Engine {
@@ -96,6 +97,8 @@ public:
 
     bool init();  // scInit: window, GL, resources
     void run();   // scRun: main loop until quit
+    int checkWorld();  // --check: report missing targets, handlers and files; returns the count
+    int checkResult_ = 0;
 
     // Where the player is.
     Room* room = nullptr;

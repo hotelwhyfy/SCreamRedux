@@ -1091,6 +1091,10 @@ void Engine::render() {
 }
 
 void Engine::run() {
+    if (opts.check) {
+        checkResult_ = checkWorld();
+        return;
+    }
     if (!init())
         return;
     // The script has built the world: this is the state every new game starts from.

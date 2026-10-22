@@ -57,7 +57,8 @@ add_executable(scream
   src/ui.cpp
   src/save.cpp
   src/menu.cpp
-  src/effects.cpp)
+  src/effects.cpp
+  src/check.cpp)
 target_include_directories(scream PRIVATE src third_party/stb)
 target_link_libraries(scream PRIVATE lua51 theoradec SDL3::SDL3)
 if(NOT MSVC)
