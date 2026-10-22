@@ -508,7 +508,7 @@ const Entry kEntries[] = {
     FN(scPlaylistStart, S::Done, ""),
     FN(scPlaylistStop, S::Done, "per-track repeat/fade fields approximated"),
     FN(scReaction, S::Done, ""),
-    FN(scRun, S::Partial, "main loop; no menu yet"),
+    FN(scRun, S::Done, "main loop: intro, menu, game"),
     FN(scScriptAdd, S::Done, ""),
     FN(scScriptGo, S::Done, ""),
     FN(scSet, S::Done, ""),
