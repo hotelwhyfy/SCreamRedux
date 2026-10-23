@@ -135,6 +135,15 @@ bool argField(App& a, const char* label, doc::Expr& e) {
     return changed;
 }
 
+// A note in the inspector, wrapped to the panel's width.
+void hint(const std::string& text) {
+    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+    ImGui::Indent();
+    ImGui::TextWrapped("%s", text.c_str());
+    ImGui::Unindent();
+    ImGui::PopStyleColor();
+}
+
 // A popup listing the text table; true (with `e` naming the global) when one was picked.
 bool pickText(App& a, doc::Expr& e) {
     bool picked = false;
@@ -255,19 +264,20 @@ bool actionEditor(App& a, doc::Call& c, size_t k) {
         // Where it leads, read from its code (scSwitch), as the maps do.
         if (auto m = a.p.moves().find(h); m != a.p.moves().end())
             for (const auto& mv : m->second) {
-                if (mv.kind == "SC_NODE") ImGui::TextDisabled("  goes to node %s", mv.target.c_str());
-                else if (mv.kind == "SC_ZOOM") ImGui::TextDisabled("  opens zoom %s", mv.target.c_str());
-                else if (!mv.node.empty()) ImGui::TextDisabled("  goes to room %s, node %s", mv.target.c_str(), mv.node.c_str());
+                std::string line;
+                if (mv.kind == "SC_NODE") line = "goes to node " + mv.target;
+                else if (mv.kind == "SC_ZOOM") line = "opens zoom " + mv.target;
+                else if (!mv.node.empty()) line = "goes to room " + mv.target + ", node " + mv.node;
                 else {
                     // No node named: the engine enters the room at the node the player
                     // was last in there, the first time at its first node.
-                    std::string first;
+                    std::string first = "?";
                     for (auto& r : a.p.rooms)
                         if (r.e->name() == mv.target)
                             if (auto n = names(r.e, "SC_NODE"); !n.empty()) first = n[0];
-                    ImGui::TextDisabled("  goes to room %s, at its last visited node", mv.target.c_str());
-                    ImGui::TextDisabled("  (the first time: %s)", first.empty() ? "?" : first.c_str());
+                    line = "goes to room " + mv.target + ", at its last visited node (the first time: " + first + ")";
                 }
+                hint(line);
             }
         changed |= argField(a, "name##handler", target);
     } else if (kind.src == "SC_FEEDBACK" || kind.src == "SC_FEEDBACK_EX") {
@@ -427,7 +437,11 @@ void inspectElement(App& a, const ElementPath& path) {
         Rect r;
         int face;
         if (objectRect(*e, r, face) && face && (r.x < 0 || r.y < 0 || r.x + r.w > 1024 || r.y + r.h > 1024))
-            ImGui::TextColored({1, 0.7f, 0.3f, 1}, "extends past the face edge: the engine clips it");
+        {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4{1, 0.7f, 0.3f, 1});
+            ImGui::TextWrapped("extends past the face edge: the engine clips it");
+            ImGui::PopStyleColor();
+        }
         bool disabled = e->find("scDisable", "SC_OBJECT") != nullptr;
         if (ImGui::Checkbox("disabled at start (scDisable)", &disabled))
             a.edit(path, [disabled](model::Element& el) {
@@ -596,7 +610,7 @@ void textTab(App& a) {
         newName.clear(), newText.clear();
     }
     ImGui::EndDisabled();
-    ImGui::TextDisabled("then use it by name, e.g. as a hotspot's feedback text");
+    hint("then use it by name, e.g. as a hotspot's feedback text");
     ImGui::Separator();
     static std::string filter;
     ImGui::SetNextItemWidth(-1);
