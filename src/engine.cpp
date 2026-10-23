@@ -197,7 +197,13 @@ bool Engine::switchNode(const std::string& name) {
 
 bool Engine::switchZoom(const std::string& name) {
     // Found by name across all rooms, the first created winning (0x403fd0).
-    View* z = world.zoom(name);
+    // A fix of this port: the current room's own zoom of that name comes first.
+    // Two rooms define a zoom "phone" (the lobby's, then the hall's, which adds
+    // the clock), so scream.exe always shows the lobby's and the hall's clock
+    // is never seen. The scripts' other duplicates are identical copies.
+    View* z = room ? room->zoom(name) : nullptr;
+    if (!z)
+        z = world.zoom(name);
     // "black" is never created by the scripts: it is an engine built-in used
     // as a blank screen around cutscenes and scripted narration.
     if (!z && name == "black") {
@@ -1614,6 +1620,34 @@ void Engine::render() {
     SDL_SetWindowTitle(window_, title.c_str());
 }
 
+// Fixes of this port for bugs in the shipped scripts, applied once they are
+// loaded. The DC's grabRag_dc (The Last Visit's cellar) has a typo,
+// scTextureUpdate(SC_LEFT("hs-cellar_dc_n1l.jpg"), 0), which calls a number
+// and stops the handler: the rag is taken but still shows from node n2. The
+// handler is replaced with the intended one, the call written correctly.
+void Engine::fixScripts() {
+    lua_State* L = script.state();
+    lua_getglobal(L, "grabRag_dc");
+    const bool present = lua_isfunction(L, -1);
+    lua_pop(L, 1);
+    if (!present)
+        return;
+    const char* fixed =
+        "function grabRag_dc()\n"
+        "  scFXPlay(\"fx-grab.ogg\")\n"
+        "  scDisable(SC_OBJECT)\n"
+        "  scBind(SC_ITEM, \"rag-dc\")\n"
+        "  scInventoryAdd()\n"
+        "  scTextureUpdate(SC_LEFT, \"hs-cellar_dc_n2l.jpg\", 1)\n"
+        "  scBind(SC_NODE, \"n2\")\n"
+        "  scTextureUpdate(SC_LEFT, \"hs-cellar_dc_n1l.jpg\", 0)\n"
+        "end\n";
+    if (luaL_dostring(L, fixed) != 0) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "script fix: %s", lua_tostring(L, -1));
+        lua_pop(L, 1);
+    }
+}
+
 void Engine::run() {
     if (opts.check) {
         checkResult_ = checkWorld();
@@ -1621,6 +1655,7 @@ void Engine::run() {
     }
     if (!init())
         return;
+    fixScripts();
     // The script has built the world: this is the state every new game starts from.
     captureBaseline();
     // From now on scBind(SC_OBJECT) follows the engine state, as in scream.exe.

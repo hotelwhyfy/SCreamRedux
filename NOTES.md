@@ -591,6 +591,19 @@ saves). Ghidra on `scream.exe` covers semantics the scripts don't reveal.
   follows the mouse and edge clicks step 45°. In scream.exe the pair is unusable (see
   Slideshow mode). The setup menu still shows and saves both switches as they are.
 - Two loops in smooth scLookAt that never end in scream.exe are made to finish.
+- Zoom lookup (`Engine::switchZoom`): the current room's own zoom of a name comes before the
+  first one created anywhere (scream.exe `0x403fd0` takes the first). Both releases create a
+  zoom "phone" in house-lobby and again in house-hall; the hall's copy adds the "clock"
+  hotspot (a description line), which scream.exe could therefore never show. The other
+  duplicate names are harmless: `lair-bucket` (house-lair and house-lair-alt) is identical,
+  `bath1-pic2` is created twice in one room, `phone-pick` has no hotspots.
+- `grabRag_dc` (DC, The Last Visit's cellar): `scTextureUpdate(SC_LEFT("hs-cellar_dc_n1l.jpg"),
+  0)` calls a number and stops the handler after the rag is taken and node n3's left face is
+  updated, so node n2 still shows the rag (`…_n1lr.jpg`). `Engine::fixScripts` replaces the
+  handler with the intended one once the scripts are loaded.
+- Left as in the original: `descendFireplace_dc` ends by calling `musicEnterCave_dc`, which no
+  script defines (an error after everything else has run; the music it was meant to start
+  can't be known).
 
 ## Deliberate differences from the original
 

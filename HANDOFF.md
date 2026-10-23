@@ -21,7 +21,8 @@ never call. C++20, SDL3, OpenGL 3.3 core, Lua 5.1.5 (patched), stb, libogg/libth
   automated player (`--explore`): the main game to `finale()` in the lair
   (~38k actions), The Last Visit to its finale (~180 actions), with no engine
   warnings. The crawler (every hotspot, item use, choice, dialogue) is clean apart
-  from two bugs in the original script and one zoom that is unreachable by design.
+  from one bug in the original script left as it is (`musicEnterCave_dc`, undefined);
+  two others are fixed (NOTES.md "Fixes of the original's problems").
 - **2006 release plays through to its ending** too (~37k actions, same hints file);
   its crawl is clean. Its Lua 5.0 scripts are translated to 5.1 bytecode at load
   (`src/lua50.cpp`). It runs on the same engine, which models the DC `scream.exe`;
@@ -139,7 +140,8 @@ Always pass `--save-dir DIR` (a temp dir) so tests don't touch the user's saves/
   Takes 5–15 min for the main game. Watch it:
   `tools/watch_explore.sh LOG 'game sd[c] --explore' 30` (prints progress, stalls,
   a runaway clock and the end; pass a bracketed pattern so pgrep can't match the watcher).
-  Expected: DC main game and TLV end with "the game ended (menu shown)".
+  Expected: DC main game and TLV end with "the game ended (menu shown)"; DC crawl 1
+  problem (musicEnterCave_dc), 2006 crawl none.
 - Real-time runs: macOS has no `timeout`; use `perl -e 'alarm N; exec @ARGV' …`.
   Kill test processes with `pkill -x scream` (never `pkill -f` with a pattern that
   appears in a watcher's command line).

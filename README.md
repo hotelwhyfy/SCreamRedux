@@ -8,6 +8,11 @@ OpenGL. Behaviour comes from the scripts and from disassembling the original
 `scream.exe`, not from guesswork; all 87 API functions are ported
 (`scream --api-status` lists them).
 
+![The opening view: Blackwood Manor at dawn, from the garden](docs/screenshot.png)
+
+*The Director's Cut's opening view, running in SCream Redux. The game's art is
+© Nucleosys; it is shown here only to illustrate the engine.*
+
 No game data is included. You need your own copy of the game.
 
 ## Status
@@ -197,6 +202,13 @@ Fixes of problems in the original:
 - Slideshow mode together with alternate control was unusable in the original
   (the cursor stuck in the middle, clicks nudging the view). Here slideshow mode
   wins: the cursor follows the mouse and edge clicks turn the view a step.
+- The hall telephone's close-up was never shown in either release: the lobby
+  defines a close-up with the same name, and the original always opened that
+  one, so the hall's clock, which only its own copy has, could never be looked
+  at. Here a room's own close-up comes first.
+- Taking the rag in the cellar (The Last Visit) left it visible from the other
+  side of the room, because of a typo in the script that stopped the handler.
+  The handler runs as intended here.
 
 Deliberate differences:
 

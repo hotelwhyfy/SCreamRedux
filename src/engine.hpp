@@ -123,6 +123,7 @@ public:
 
     bool init();  // scInit: window, GL, resources
     void run();   // scRun: main loop until quit
+    void fixScripts();  // corrections of bugs in the shipped scripts (engine.cpp)
     int checkWorld();  // --check: report missing targets, handlers and files; returns the count
     int checkResult_ = 0;
     // --crawl (crawl.cpp): one step per frame; false when finished.
