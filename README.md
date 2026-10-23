@@ -4,29 +4,44 @@ A reimplementation of the SCream engine used by *Scratches* (2006) and
 *Scratches – Director's Cut* (2007). It runs the **original, unmodified game
 scripts and data**: the compiled Lua scripts build the world through the
 engine's `sc*` API, which this project reimplements in C++20 with SDL3 and
-OpenGL.
+OpenGL. Behaviour comes from the scripts and from disassembling the original
+`scream.exe`, not from guesswork; all 87 API functions are ported
+(`scream --api-status` lists them).
 
 No game data is included. You need your own copy of the game.
 
 ## Status
 
-The Director's Cut is playable from start to finish in principle: intro and
-main menu, both campaigns, cube-map scenes with the original camera behaviour
-and hotspots, close-ups, Theora cutscenes, Vorbis sound/music/voices,
-subtitles, dialogue choices, inventory (with the tutorial hints), journal,
-save/load and quicksave, crossfade transitions, the original keyboard shortcuts
-and gamma correction, and the sky/fog/rain/night/candle/lightning effects. Text
-(feedback, subtitles including the DC intro's .srt, choices, journal) uses the
-original's layout and monospaced font. The original 2006 release runs too (its
-Lua 5.0 scripts are translated to 5.1 bytecode as they load). Both campaigns of
-the Director's Cut and the 2006 game have been played through to their endings
-by the automated player (`--explore`). The menu follows the original's layout,
-slideshow mode included. When the 2006 game runs, the engine behaves as the
-2006 executable did (its field of view and pitch, 800×600 layout, text width,
-inventory grid, menu and sky).
-`scream --api-status` lists the state of all 87 API functions.
+Both releases are playable from start to finish: the Director's Cut (both
+campaigns, the main game and The Last Visit) and the original 2006 release. The
+automated player (`--explore`) plays each of them through to its ending.
 
-See [NOTES.md](NOTES.md) for the reverse-engineering notes.
+Ported from the original:
+
+- **World:** cube-map panoramas with the original camera, hotspots and close-ups.
+- **Media:** Theora cutscenes; Vorbis sound, music (including surround tracks)
+  and voices; subtitles.
+- **Text:** feedback, subtitles, choices and the journal in the original's layout
+  and monospaced font.
+- **Screens:** the inventory with its tutorial hints, the journal, and the main
+  and setup menus.
+- **Effects:** the original's crossfades, gamma correction, sky, fog, rain,
+  night, lightning and candlelight.
+- **Controls:** the keyboard shortcuts, slideshow mode and alternate control.
+- **Settings and saves:** `scream.cfg`, and saved games in the original file
+  format.
+
+The 2006 release's Lua 5.0 scripts are translated to Lua 5.1 as they load. When
+it runs, the engine behaves as the 2006 executable did:
+
+- its field of view and vertical look range
+- 800×600 layout, so text wraps at about 70 characters
+- an inventory 8 icons wide
+- its menu
+- generated clouds
+
+See [NOTES.md](NOTES.md) for the reverse-engineering notes (with addresses in
+`scream.exe`) and [HANDOFF.md](HANDOFF.md) for the project's state and workflow.
 
 ## Building
 
@@ -41,8 +56,8 @@ cmake --build build -j
 ## Game data
 
 Unpack the installers (see NOTES.md; `unar` handles the NSIS installers and the
-split 7z) so you have directories containing `scream.sc`, `scratches.sc` and
-the `.res` archives. For the updated Director's Cut:
+split 7z) so you have directories containing `scream.sc`, `scratches.sc`,
+`scream.cfg` and the `.res` archives. For the updated Director's Cut:
 
 ```sh
 ./build/scream --data extracted/dc/install --data extracted/dc/update
@@ -56,41 +71,112 @@ release (scripts and `scream.res` from the installer, `scratches.res` from the d
 ./build/scream --data extracted/2006/install --data extracted/2006/disc
 ```
 
-## Running
+## Configuration: `scream.cfg`
+
+The game's own `scream.cfg` (found in the data directories) is read the way the
+original reads it, and every key takes effect:
+
+| key | effect |
+|---|---|
+| SCRIPT | the game script (`SCRIPT.sc`, else `SCRIPT.lua`) |
+| WIDTH, HEIGHT | the screen mode: the size of the window and the scale of every on-screen layout (the DC ships 1024×768, the 2006 release 800×600) |
+| FULLSCREEN | start fullscreen (the mode is scaled to your display) |
+| QUALITY | 0 gives nearest-pixel textures |
+| VSYNC | 1 syncs to the display |
+| SURROUND | also play the rear-channel music files |
+| LOG | write `scream.log` in the save folder (the L key toggles it) |
+| PATH, RESOURCE, LANGUAGE | as in the original |
+| DEPTH, RATE, AUDIO_DEVICE, BUFFER_SIZE, NUM_BUFFERS, DEBUG | read, but they only affected Windows display and OpenAL setup |
+
+The shipped files ask for fullscreen. Pass `--windowed` (or `--window WxH`) to
+run in a window.
+
+## Playing
+
+Mouse:
+
+- **Look around.** The Director's Cut starts with *alternate control* on: the
+  view follows the mouse and the cursor stays in the middle. Turn it off in
+  Setup to look around by moving the mouse to the screen edges instead, the
+  2006 release's only mode. In *slideshow mode* (Setup), clicking an edge turns
+  the view a step instead.
+- **Interact.** Left-click.
+- **Inventory.** Right-click opens and closes it. Left-click an item to pick it
+  up, then left-click where to use it.
+
+Keys, as `scream.exe` maps them:
+
+| key | action |
+|---|---|
+| A / Left | turn left |
+| D / Up | turn right |
+| W / Right | look up |
+| S / Down | look down |
+| E / Space | look straight ahead |
+| F1 | hints |
+| F2 | surround music |
+| F5 / F7 | quicksave / quickload |
+| F9 / F10 | camera speed / text speed |
+| F12 | gamma |
+| L | log file on or off |
+
+Esc closes the inventory, journal or overlay, or opens the menu. Esc or Space
+skips a cutscene. In the Director's Cut, Esc also skips scripted pauses such as
+the opening logos.
+
+Extras of this port: middle-drag to look around, F11 for a screenshot.
+
+**Saved games** go to the user data folder
+(`~/Library/Application Support/SCreamRedux/Scratches` on macOS) as
+`scream.001`–`scream.010` and `scream.011` (the quicksave), in the original
+engine's own format. To carry on with saves from an original installation, copy
+them into that folder. Director's Cut saves only work with the Director's Cut,
+and 2006 saves only with the 2006 release. As in the original, a save's name is
+whatever the game script gives it, such as "Garden, Day 1, 10am". This port's
+earlier `slotN.sav` files still load.
+
+Setup choices are kept in `settings.cfg` in the same folder (the original
+forgot them).
+
+## Command line
 
 ```
+--data DIR              a data directory (repeatable; later ones win)
+--windowed / --fullscreen / --window WxH   override scream.cfg's mode
 --game sdc|tlv          skip the intro and menu: main game or The Last Visit
 --start ROOM[:NODE]     skip the intro and start at a location, e.g. garden:n1
+--save-dir DIR          keep saves and settings in DIR
 --hotspots              draw clickable areas
 --trace                 log every sc* call
 --exec LUA              run Lua once startup is idle; debugClick(name) clicks an object
 --screenshot FILE       write a PNG once the scene settles, then quit
 --verify-media          decode every image, sound and video in the archives
---windowed / --fullscreen / --window WxH   override scream.cfg's mode
+--api-status            list all sc* functions and their state
 ```
 
-`scream.cfg` from the data directories is read as the original reads it: SCRIPT
-picks the game script, WIDTH × HEIGHT the screen layout (the DC's 1024×768, the
-2006 release's 800×600) and the window size, FULLSCREEN whether it starts
-fullscreen (scaled to your display), QUALITY 0 nearest-pixel textures, VSYNC,
-SURROUND the rear music channels, LOG a `scream.log` in the save folder (the L
-key toggles it). The shipped files ask for fullscreen; pass `--windowed` to run
-in a window.
+Test tools (use `--save-dir` with a temporary folder so your saves are left alone):
 
-Controls (as the original): the Director's Cut starts with "alternate control"
-on, where the view follows the mouse and the cursor stays in the middle; switch it
-off in Setup to look around by moving the mouse to the screen edges instead (the
-original 2006 way, and the 2006 release's only mode). Left-click to interact, right-click to open/close the inventory (left-click an
-item to pick it up, then left-click where to use it). Esc closes the inventory,
-journal or overlay, or opens the menu; Esc or Space skips a cutscene. Keys, as
-scream.exe maps them: A / Left turn left, D / Up turn right, W / Right look up,
-S / Down look down, E / Space look straight ahead; F1 hints, F2 surround music,
-F5 quicksave, F7 quickload, F9 camera speed, F10 text speed, F12 gamma.
-Extras of this port: middle-drag to look around, F11 for a screenshot.
+```
+--check                 check the world the script builds (targets, handlers, files)
+--crawl                 click every hotspot, try every item, run every choice and dialogue
+--explore [--explore-hints FILE]   with --game: play automatically to the end
+--turbo                 no audio or video, game time fast-forwarded
+```
 
-Saved games go to the user data folder
-(`~/Library/Application Support/SCreamRedux/Scratches` on macOS) as
-`scream.001`–`scream.010` and `scream.011` (the quicksave), in the original
-engine's own format: copy saves from an original installation there to carry
-on with them (Director's Cut saves with the Director's Cut, 2006 saves with the
-2006 release). Setup preferences are kept in `settings.cfg` there.
+## Known limits
+
+Not yet verified:
+
+- **Saved games** follow the original writer's code but haven't been checked
+  against a file the original executable made.
+- **Fade lengths** depend on the original audio thread's timer interval, which
+  isn't recorded in the binary. It is assumed to be 2 ms.
+
+Deliberate differences:
+
+- The screen mode is scaled to your window or display instead of switching the
+  display resolution.
+- Loading a game starts from a clean start-of-game state before applying the
+  file.
+
+Both lists are kept in full in [NOTES.md](NOTES.md).
