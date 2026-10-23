@@ -191,7 +191,8 @@ unluac: `/opt/homebrew/opt/openjdk/bin/java -jar tools/vendor/unluac.jar file.sc
 - Commit messages end with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`;
   push to `origin main` after committing.
 - Never commit game data or derived game content (`.gitignore` covers ISOs, exes,
-  `extracted/`, root screenshots) — including puzzle answers in notes or tests.
+  `extracted/`, root screenshots) — including puzzle answers in notes or tests. One exception,
+  approved by the user: the README's screenshot, `docs/screenshot.png`, credited to Nucleosys.
 - Record every binary finding in NOTES.md with its address; mark guesses as such
   (in code comments and the `--api-status` notes).
 - Long test runs: watch them actively and report real progress (compare action counts).
