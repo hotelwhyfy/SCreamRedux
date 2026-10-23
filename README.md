@@ -206,7 +206,9 @@ developers' own layout, and every other line of the file stays as it was.
 - **Node view:** the panorama with its hotspots on the cube faces. Drag
   to look around, drag a hotspot to move or resize it, and use *New hotspot*
   to draw one (coordinates snap to the developers' 5-unit grid).
-  Double-click a hotspot to follow it.
+  Double-click a hotspot to go where it leads, as the game would (through its
+  handler's `scSwitch` for doors and steps; a close-up's way out goes back to
+  where you came from).
 - **Zoom view:** close-ups with their hotspots, edited the same way.
 - **Map:** the whole game, or one room. The original has no map of its own:
   each room is a separate set of nodes, and most doors are hotspots whose

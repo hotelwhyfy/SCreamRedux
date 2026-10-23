@@ -58,6 +58,20 @@ std::vector<InputStep> parseInput(const std::string& script) {
     return out;
 }
 
+// The mouse id of --input's events: the real mouse is ignored while a script
+// runs, or a pointer resting over the window would move ImGui's.
+constexpr SDL_MouseID kScriptMouse = 0x5C5C;
+
+bool fromRealMouse(const SDL_Event& e) {
+    switch (e.type) {
+    case SDL_EVENT_MOUSE_MOTION: return e.motion.which != kScriptMouse;
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+    case SDL_EVENT_MOUSE_BUTTON_UP: return e.button.which != kScriptMouse;
+    case SDL_EVENT_MOUSE_WHEEL: return e.wheel.which != kScriptMouse;
+    default: return false;
+    }
+}
+
 void pushInput(SDL_Window* window, const InputStep& st, float& mx, float& my) {
     SDL_Event e{};
     SDL_WindowID wid = SDL_GetWindowID(window);
@@ -66,10 +80,12 @@ void pushInput(SDL_Window* window, const InputStep& st, float& mx, float& my) {
         mx = arg(0, mx), my = arg(1, my);
         e.type = SDL_EVENT_MOUSE_MOTION;
         e.motion.windowID = wid;
+        e.motion.which = kScriptMouse;
         e.motion.x = mx, e.motion.y = my;
     } else if (st.action == "down" || st.action == "up") {
         e.type = st.action == "down" ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
         e.button.windowID = wid;
+        e.button.which = kScriptMouse;
         e.button.button = Uint8(arg(0, 1));
         e.button.down = st.action == "down";
         e.button.clicks = 1;
@@ -77,6 +93,7 @@ void pushInput(SDL_Window* window, const InputStep& st, float& mx, float& my) {
     } else if (st.action == "wheel") {
         e.type = SDL_EVENT_MOUSE_WHEEL;
         e.wheel.windowID = wid;
+        e.wheel.which = kScriptMouse;
         e.wheel.y = arg(0, 1);
         e.wheel.mouse_x = mx, e.wheel.mouse_y = my;
     } else if (st.action == "text" && !st.args.empty()) {  // typed text; _ is a space
@@ -352,6 +369,7 @@ int runApp(const AppOptions& opts) {
             if (st.frame == frame) pushInput(window, st, inputX, inputY);
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
+            if (!input.empty() && fromRealMouse(e)) continue;
             ImGui_ImplSDL3_ProcessEvent(&e);
             if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) running = false;
         }
@@ -360,6 +378,9 @@ int runApp(const AppOptions& opts) {
 
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplSDL3_NewFrame();
+        // The backend reads the system pointer while the window has focus (no button
+        // held); a script's pointer, queued after it, wins.
+        if (!input.empty()) io.AddMousePosEvent(inputX, inputY);
         ImGui::NewFrame();
         // Shortcuts (Ctrl is Cmd on macOS).
         if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_S, ImGuiInputFlags_RouteGlobal))

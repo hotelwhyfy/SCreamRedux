@@ -33,6 +33,8 @@ struct App {
 
     // What is open: a room, one of its nodes or zooms, and an object in it.
     ElementPath room, view, object;
+    // Views left by following hotspots (double-click), for zooms' way back out.
+    std::vector<std::pair<ElementPath, ElementPath>> history;
     enum class Center { View, Map, Handler, Text, Asset } center = Center::View;
     std::string handler;  // Center::Handler: the function shown
     std::string asset;    // Center::Asset: the file shown

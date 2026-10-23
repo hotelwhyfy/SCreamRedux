@@ -135,26 +135,72 @@ void addObject(App& a, const std::string& face, const Rect& r) {
     a.object = path;
 }
 
-// Follow an object's click (SC_NODE / SC_ZOOM / SC_ROOM) the way the game would.
-void follow(App& a, model::Element& o) {
+// Follow an object's click the way the game would: to a node, zoom or room,
+// through a handler's scSwitch calls (its first move), or back out of a zoom
+// to the view it was opened from. Returns false when the click goes nowhere.
+bool follow(App& a, model::Element& o) {
     auto* c = o.find("scOnClick");
-    if (!c || c->args.size() < 2) return;
-    std::string kind = c->args[0].src, target = a.p.resolve(c->args[1]);
-    model::Element* room = a.roomEl();
-    if (!room) return;
-    auto open = [&](const std::string& k) {
+    if (!c || c->args.empty()) return false;
+    std::string kind = c->args[0].src, target = c->args.size() > 1 ? a.p.resolve(c->args[1]) : std::string();
+    std::string node;  // a room switch's node, when the handler names one
+    if (kind == "SC_CUSTOM") {
+        auto m = a.p.moves().find(target);
+        if (m == a.p.moves().end() || m->second.empty()) {
+            a.status = target + "() doesn't move the player (no scSwitch in its code)";
+            return false;
+        }
+        kind = m->second[0].kind, target = m->second[0].target, node = m->second[0].node;
+    }
+    const auto here = std::make_pair(a.room, a.view);
+    auto went = [&](bool ok) {
+        if (ok) a.history.push_back(here);
+        return ok;
+    };
+    if (kind == "SC_ZOOMOUT" || kind == "SC_ZOOMBACK") {
+        // Back to where the zoom was opened from (ZOOMBACK: out of every zoom).
+        while (!a.history.empty()) {
+            auto [r, v] = a.history.back();
+            a.history.pop_back();
+            model::Element* ve = a.p.find(v);
+            if (ve && (kind == "SC_ZOOMOUT" || ve->kind() == "SC_NODE")) {
+                a.select(r, v);
+                return true;
+            }
+        }
+        a.status = "opened directly: no view to go back to";
+        return false;
+    }
+    if (kind == "SC_NODE") {
+        model::Element* room = a.roomEl();
+        if (!room) return false;
         for (size_t i = 0; i < room->children.size(); ++i)
-            if (room->children[i].kind() == k && room->children[i].name() == target) {
+            if (room->children[i].kind() == "SC_NODE" && room->children[i].name() == target) {
                 ElementPath vp = a.room;
                 vp.index.push_back(int(i));
                 a.select(a.room, vp);
-                return true;
+                return went(true);
             }
+        a.status = "no node " + target + " in this room";
         return false;
-    };
-    if (kind == "SC_NODE") open("SC_NODE");
-    else if (kind == "SC_ZOOM" && !open("SC_ZOOM")) a.jumpTo(target);
-    else if (kind == "SC_ROOM") a.jumpTo(target);
+    }
+    if (kind == "SC_ZOOM") {
+        // The room's own zoom of that name first, else the first anywhere (as scSwitch).
+        if (model::Element* room = a.roomEl())
+            for (size_t i = 0; i < room->children.size(); ++i)
+                if (room->children[i].kind() == "SC_ZOOM" && room->children[i].name() == target) {
+                    ElementPath vp = a.room;
+                    vp.index.push_back(int(i));
+                    a.select(a.room, vp);
+                    return went(true);
+                }
+        return went(a.jumpTo(target));
+    }
+    if (kind == "SC_ROOM") {
+        // The game opens the room at the node last visited there; the editor at its first
+        // node, or at the one the handler names (scSetLastVisited).
+        return went(a.jumpTo(node.empty() ? target : target + "/" + node));
+    }
+    return false;
 }
 
 void tooltip(App& a, model::Element& o) {
@@ -204,7 +250,13 @@ Viewport nodeView(App& a, model::Element& node) {
                 if (s.path == a.object) sel = &s;
             const float margin = 12 * kFace / float(w) * a.cam.fovY / 60;
             int e = sel && sel->face == hoverFace ? edgesAt(sel->rect, hx, hy, margin) : -1;
-            if (a.createMode) {
+            if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && !a.createMode) {
+                d.mode = App::Drag::Mode::None;  // the first click selected it; this one follows it
+                ElementPath target = hovered->path;
+                a.later([&a, target] {
+                    if (model::Element* o = a.p.find(target)) follow(a, *o);
+                });
+            } else if (a.createMode) {
                 d.mode = App::Drag::Mode::Create;
                 d.face = hoverFace;
             } else if (e >= 0) {
@@ -215,7 +267,6 @@ Viewport nodeView(App& a, model::Element& node) {
                 a.p.touch(a.object);
             } else if (hovered) {
                 a.object = hovered->path;
-                if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) follow(a, *hovered->e);
                 d.mode = App::Drag::Mode::None;
             } else {
                 a.object = {};
@@ -344,7 +395,12 @@ void zoomView(App& a, model::Element& zoom) {
         for (auto& s : spots)
             if (s.path == a.object) sel = &s;
         int e = sel ? edgesAt(sel->rect, zx, zy, 8 / sx) : -1;
-        if (a.createMode) {
+        if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && !a.createMode) {
+            ElementPath target = hovered->path;
+            a.later([&a, target] {
+                if (model::Element* o = a.p.find(target)) follow(a, *o);
+            });
+        } else if (a.createMode) {
             d.mode = App::Drag::Mode::Create;
         } else if (e >= 0) {
             d.mode = e ? App::Drag::Mode::Resize : App::Drag::Mode::Move;
@@ -353,7 +409,6 @@ void zoomView(App& a, model::Element& zoom) {
             a.p.touch(a.object);
         } else if (hovered) {
             a.object = hovered->path;
-            if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) follow(a, *hovered->e);
         } else {
             a.object = {};
         }
