@@ -134,6 +134,8 @@ bool Engine::crawlStep() {
     case P::Enter:
         if (!idle() && ++c.frames < Crawler::kBudget) return true;
         script.cancelAll();
+        escWaits_ = 0;  // the cancelled waits won't count down
+        escSkip_ = false;
         if (!t.view.empty()) {
             Room* r = world.room(t.room);
             if (r->node(t.view)) {

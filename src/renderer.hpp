@@ -82,6 +82,8 @@ public:
     bool init();
     // scream.cfg QUALITY 0: textures made from now on use nearest filtering.
     static void setNearest(bool on);
+    // Apply the current filtering to every texture already loaded.
+    void refilterAll();
     void beginFrame(int width, int height);
     using Pass = RenderPass;
     void drawNode(const View& node, const Camera& cam, const Viewport& vp, const Pass& pass = {});

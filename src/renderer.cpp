@@ -507,6 +507,15 @@ void Renderer::uploadInto(Texture& t, int w, int h, const uint8_t* rgba) {
 
 void Renderer::setNearest(bool on) { gNearest = on; }
 
+void Renderer::refilterAll() {
+    for (auto& [name, t] : textures_) {
+        if (!t.id) continue;
+        gl::BindTexture(gl::TEXTURE_2D, t.id);
+        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gNearest ? gl::NEAREST : gl::LINEAR);
+        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gNearest ? gl::NEAREST : gl::LINEAR);
+    }
+}
+
 void Renderer::captureFrame(Texture& t) {
     if (!t.id) {
         gl::GenTextures(1, &t.id);

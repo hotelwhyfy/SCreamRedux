@@ -1114,8 +1114,8 @@ void Engine::hotkey(int vk) {
         break;
     }
     case 0x1b:  // Esc (the menu handles its own)
-        if (sleeping_ > 0 && !release2006) {  // the DC's scSleep takes it (0x4124a0)
-            sleepSkip_ = true;
+        if (escWaits_ > 0) {  // a waiting loop takes it (scSleep, voices, dialogue)
+            escSkip_ = true;
             break;
         }
         if (menuOpen() || choice_)
@@ -1392,6 +1392,36 @@ void Engine::updateRelativeMouse() {
         SDL_WarpMouseInWindow(window_, mouseX_, mouseY_);  // the system pointer reappears where ours was
 }
 
+// The setup launcher (or an editor) saved scream.cfg while the game runs:
+// read it again and apply what can change live. scream.exe read it once;
+// this is the port's addition, with nothing shown in-game.
+void Engine::watchConfig() {
+    if (opts.turbo || realTime() < configCheck_)
+        return;
+    configCheck_ = realTime() + 1;
+    std::error_code ec;
+    const auto path = findData("scream.cfg");
+    const auto time = path.empty() ? std::filesystem::file_time_type{} : std::filesystem::last_write_time(path, ec);
+    if (ec || time == configTime_)
+        return;
+    const bool first = configTime_ == std::filesystem::file_time_type{};
+    configTime_ = time;
+    if (first || !window_)
+        return;  // read at startup already
+    const Config before = config;
+    config = Config{};  // keys taken out of the file go back to their defaults
+    loadSettings("scream.cfg");
+    SDL_Log("scream.cfg changed: applied");
+    if (opts.fullscreen < 0 && config.fullscreen != before.fullscreen)
+        SDL_SetWindowFullscreen(window_, config.fullscreen != 0);
+    if (opts.windowW <= 0 && !config.fullscreen && (config.width != before.width || config.height != before.height))
+        SDL_SetWindowSize(window_, config.width, config.height);
+    if (config.vsync != before.vsync)
+        SDL_GL_SetSwapInterval(config.vsync ? 1 : 0);
+    if ((config.quality == 0) != (before.quality == 0))
+        renderer.refilterAll();
+}
+
 void Engine::updateQuickLoad() {
     if (quickLoadAt_ < 0 || realTime() < quickLoadAt_)
         return;
@@ -1405,6 +1435,7 @@ void Engine::updateQuickLoad() {
 
 void Engine::update(double dt) {
     frameDt_ = dt;
+    watchConfig();
     updateQuickLoad();
     sound.setSurround(std::holds_alternative<double>(settings[sc::SURROUND]) && std::get<double>(settings[sc::SURROUND]) != 0);
     if (menuOpen()) {

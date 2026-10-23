@@ -254,7 +254,10 @@ ECX), so Ghidra's decompiler hides arguments; read the disassembly alongside. Sc
 - `scMotion`/`scStill`: `0x48bc08` gates camera input. `scSleep` (`0x4124a0`) clears it and
   enters wait mode for the duration, then sets motion back to 1 unconditionally. While it
   waits it peeks the message queue (`0x419b80`, PM_REMOVE): Esc ends the sleep and stops every
-  playing channel (how the logo sequences are skipped); other input is dropped.
+  playing channel (how the logo sequences are skipped); other input is dropped. The same
+  Esc check ends a voice played with wait (`scFXPlayEx`, `0x416120` → `0x416160`; 2006 P
+  `0x413960`) and the current dialogue line of `scScriptGo` (`0x415778`, the next line follows);
+  the 2006 scSleep has none.
 - Camera (`0x407e20`, `0x40df60`): yaw in radians; pitch is the look vector's y, clamped to
   ±1.75 (~60.3°). Edge zones are 15% of the width; vertically 15% of (H−192) from the top bar
   and from H−128. Rate per frame = depth_px × 0.005 × CAM_SPEED/1000 × ramp × 60/fps; ramp
@@ -596,6 +599,8 @@ saves). Ghidra on `scream.exe` covers semantics the scripts don't reveal.
   Settings… ⌘,) edits the game's scream.cfg in place (backup `scream.cfg.orig`); it adds the
   port's own key WIDESCREEN (default 1), which scream.exe's parser skips like any unknown
   word. The original had no launcher; scream.exe contains an uncalled cfg writer (`0x40f8e0`).
+  scream.exe reads the cfg once; the port re-reads it when it changes and applies the mode,
+  fullscreen, widescreen, vsync, texture filtering and log at once.
 - Additions: middle-drag look, F11 screenshot, the captured pointer for alternate control on
   macOS (the original's SetCursorPos recentring triggers "shake to locate"), the macOS
   fullscreen menu bar suppressed, and the test tools (`--check`, `--crawl`, `--explore`, …).

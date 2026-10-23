@@ -101,8 +101,10 @@ Click a setting (right-click to go back), or use the arrow keys and Return. It
 also has this port's one addition to the file, `WIDESCREEN`: when it's on,
 panoramas fill a window wider than 4:3; when it's off, they keep the original's
 4:3 with black sides, like everything else. The original's own parser skips the
-key, so the file still works with the original game. Changes take effect the
-next time the game starts.
+key, so the file still works with the original game. A running game notices
+when the file is saved and applies the changes within a second: screen mode,
+fullscreen, widescreen, vertical sync, textures and the log file at once,
+surround music from the next track.
 
 ## Playing
 
@@ -134,8 +136,9 @@ Keys, as `scream.exe` maps them:
 | L | log file on or off |
 
 Esc closes the inventory, journal or overlay, or opens the menu. Esc or Space
-skips a cutscene. In the Director's Cut, Esc also skips scripted pauses such as
-the opening logos.
+skips a cutscene. As in the original, Esc also cuts short a line of narration or
+dialogue the game is waiting on (each press skips one line), and in the
+Director's Cut a scripted pause.
 
 Extras of this port: middle-drag to look around, F11 for a screenshot.
 
@@ -157,7 +160,7 @@ forgot them).
 --data DIR              a data directory (repeatable; later ones win)
 --windowed / --fullscreen / --window WxH   override scream.cfg's mode
 --setup                 open the setup launcher first
---game sdc|tlv          skip the intro and menu: main game or The Last Visit
+--game sdc|tlv          skip the menu and start a new game (main game or The Last Visit)
 --start ROOM[:NODE]     skip the intro and start at a location, e.g. garden:n1
 --save-dir DIR          keep saves and settings in DIR
 --hotspots              draw clickable areas

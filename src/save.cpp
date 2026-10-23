@@ -162,6 +162,8 @@ bool Engine::restoreState(const std::string& data) {
         return false;
 
     script.cancelAll();
+    escWaits_ = 0;  // the cancelled waits won't count down
+    escSkip_ = false;
     sound.stopAll();
     video_.reset();
     choice_ = nullptr;

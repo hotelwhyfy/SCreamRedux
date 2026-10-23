@@ -245,12 +245,13 @@ int scSleep(lua_State* L) {
     double until = E->now() + argNum(L, 1);
     if (!E->release2006) E->motion = false;
     setWaitMode(true);
-    ++E->sleeping_;
-    return E->script.wait(L, [until] {
-        const bool skipped = E->sleepSkip_;
+    const bool escapable = !E->release2006;
+    if (escapable) ++E->escWaits_;
+    return E->script.wait(L, [until, escapable] {
+        const bool skipped = escapable && E->takeEscSkip();
         if (!skipped && E->now() < until) return false;
         if (skipped) E->sound.stopChannels();
-        if (--E->sleeping_ == 0) E->sleepSkip_ = false;
+        if (escapable) --E->escWaits_;
         E->motion = true;
         setWaitMode(false);
         return true;
@@ -364,8 +365,11 @@ int scScriptGo(lua_State* L) {
     const Dialogue* d = it->second.get();
     E->sound.duckMusic(-0.25f);
     auto next = std::make_shared<size_t>(0);
+    // Esc ends the line being spoken; the next one follows (0x415778).
+    ++E->escWaits_;
     auto finished = [d, next] {
-        if (E->sound.voicePlaying()) return false;
+        if (E->takeEscSkip()) E->sound.stopChannel(sc::DIALOGUE);
+        else if (E->sound.voicePlaying()) return false;
         while (*next < d->lines.size()) {
             const DialogueLine& line = d->lines[(*next)++];
             if (line.flag != 0 && !E->hintsOn()) continue;
@@ -374,6 +378,7 @@ int scScriptGo(lua_State* L) {
         }
         E->sound.duckMusic(0.25f);
         E->feedback("");
+        --E->escWaits_;
         return true;
     };
     if (finished()) return 0;
@@ -441,7 +446,14 @@ int scFXPlayEx(lua_State* L) {
     int channel = argInt(L, 1);
     E->sound.playChannel(channel, argStr(L, 2), argInt(L, 4) != 0);
     if (argInt(L, 3) == 0) return 0;
-    return E->script.wait(L, [channel] { return !E->sound.channelPlaying(channel); });
+    // Waiting for it to end; Esc stops it (0x416120, 2006 P 0x413920).
+    ++E->escWaits_;
+    return E->script.wait(L, [channel] {
+        if (E->takeEscSkip()) E->sound.stopChannel(channel);
+        else if (E->sound.channelPlaying(channel)) return false;
+        --E->escWaits_;
+        return true;
+    });
 }
 
 // Two calls in the shipped script pass a channel first, scFXPlayEx-style.

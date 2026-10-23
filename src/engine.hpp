@@ -186,8 +186,11 @@ public:
     bool locked = false;    // scLock/scUnlock (0x48bc0c): input off, cursor hidden
     bool waitMode = false;  // scWait/scGo (0x48bc10): show the wait cursor while locked
     bool motion = true;     // scMotion/scStill (0x48bc08): camera input allowed
-    int sleeping_ = 0;      // scSleep calls waiting
-    bool sleepSkip_ = false;  // Esc during a DC scSleep
+    // Waits that Esc ends, as scream.exe's loops peek for it (0x419b80): a DC
+    // scSleep, a voice played with wait (scFXPlayEx), a dialogue line.
+    int escWaits_ = 0;
+    bool escSkip_ = false;
+    bool takeEscSkip() { const bool s = escSkip_; escSkip_ = false; return s; }
     void abortGame();       // scAbort: wait for input after the ending, then leave
     void leaveAbortedGame();
     bool loadSettings(const std::string& file);  // scLoadSettings / scream.cfg
@@ -199,6 +202,9 @@ public:
         int widescreen = 1;  // this port's key: panoramas fill a window wider than 4:3
     } config;
     void applyConfig();
+    void watchConfig();  // re-read scream.cfg when the setup launcher saves it
+    std::filesystem::file_time_type configTime_{};
+    double configCheck_ = 0;
     void setLogging(bool on);  // SC_LOG: append the log to scream.log
     double now() const { return gameClock_; }  // game time; stops while the menu is open
     double realTime() const;
