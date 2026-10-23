@@ -591,6 +591,10 @@ What the shipped scripts say about the developers' own workflow (the basis of `s
   (`scream --dump-world`). The regenerated layout matches the shipped line info in 99.70% of
   the 14,461 gaps between calls (29 of 55 builders identical; the rest differ by comments and
   discretionary blank lines).
+- Both executables contain Lua's parser (its error strings, "unexpected symbol",
+  "chunk has too many syntax levels"), and the DC exe falls back to `SCRIPT.lua`. A new game's plain-source
+  `scream.sc` and `game.lua` should therefore load in the original too. Not tried: the exe hasn't
+  been run here. The loader call for `scream.sc` itself wasn't traced.
 
 ## Porting strategy
 

@@ -13,6 +13,7 @@
 #include "app.hpp"
 #include "luadoc.hpp"
 #include "model.hpp"
+#include "newproject.hpp"
 
 namespace {
 
@@ -24,6 +25,10 @@ void usage() {
         "  --data DIR         data directories for images and sounds (repeatable)\n"
         "  --stats SCRIPT     print what the parser finds in a script\n"
         "  --roundtrip IN OUT regenerate every builder function of IN into OUT\n"
+        "  --new DIR [TITLE]  make a new game from the template (placeholder art), then open it\n"
+        "  --pack DIR OUT.res pack the .jpg, .tga and .ogg files of DIR into a .res archive\n"
+        "  --import-panorama IMAGE OUTDIR BASE [SIZE]\n"
+        "                     cut an equirectangular panorama into BASEf.jpg ... BASEd.jpg\n"
         "\n"
         "testing:\n"
         "  --open ROOM[/VIEW[/OBJECT]]  open that place\n"
@@ -130,9 +135,38 @@ int main(int argc, char** argv) {
             return argv[++i];
         };
         if (a == "--stats") return stats(next());
+        if (a == "--new-only") {  // --new without opening the editor (tests)
+            std::string dir = next(), error;
+            std::string title = i + 1 < argc && argv[i + 1][0] != '-' ? argv[++i] : "Untitled";
+            if (!editor::createProject(dir, title, error)) return std::fprintf(stderr, "%s\n", error.c_str()), 1;
+            return 0;
+        }
         if (a == "--roundtrip") {
             std::string in = next();
             return roundtrip(in, next());
+        }
+        if (a == "--new") {
+            std::filesystem::path dir = next();
+            std::string title = i + 1 < argc && argv[i + 1][0] != '-' ? argv[++i] : "Untitled";
+            std::string error;
+            if (!editor::createProject(dir, title, error)) {
+                std::fprintf(stderr, "%s\n", error.c_str());
+                return 1;
+            }
+            std::printf("made %s\n", dir.string().c_str());
+            opts.dataDirs.push_back(dir);
+            continue;
+        }
+        if (a == "--pack") {
+            std::string dir = next(), out = next(), error;
+            if (!editor::packArchive(dir, out, error)) return std::fprintf(stderr, "%s\n", error.c_str()), 1;
+            return 0;
+        }
+        if (a == "--import-panorama") {
+            std::string img = next(), dir = next(), base = next(), error;
+            int size = i + 1 < argc && argv[i + 1][0] != '-' ? std::stoi(argv[++i]) : 1024;
+            if (!editor::importPanorama(img, dir, base, size, error)) return std::fprintf(stderr, "%s\n", error.c_str()), 1;
+            return 0;
         }
         if (a == "--data") opts.dataDirs.emplace_back(next());
         else if (a == "--open") opts.open = next();

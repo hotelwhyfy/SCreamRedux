@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "constants.hpp"
+#include "images.hpp"
 #include "renderer.hpp"
 #include "resources.hpp"
 #include "script.hpp"
@@ -40,6 +41,9 @@ struct ScreenMode {
     }
 };
 inline ScreenMode gMode;
+
+// The 2006 engine's generated cloud texture (effects.cpp); also the editor's placeholder clouds.
+Image cloudTexture2006();
 
 struct Options {
     std::vector<std::filesystem::path> dataDirs;  // searched in order; later ones win

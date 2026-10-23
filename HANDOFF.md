@@ -45,6 +45,11 @@ a failed `scBind` unbinds; rooms remember the last node; view switches release `
 
 ## Open items
 
+0. Editor (`scream-edit`, plan file in ~/.claude/plans/we-have-the-game-abundant-wozniak.md): all five
+   milestones in place. The template game passes --check, --crawl (8 tasks) and --explore (ends in 2
+   actions). Not done: auditioning sounds in the editor, a 2006 flag for Play on 2006 scripts (they
+   run as DC), and running a generated game in the original scream.exe.
+
 1. Untested against real files: saved games in the original formats (`src/save.cpp`, DC and
    2006 layouts from the writers `0x411370` / P `0x40f1f0`). An original save would confirm
    the layout (load it with F7 after copying it to the save folder as `scream.011`).
@@ -88,6 +93,7 @@ src/
     ui.hpp              App state shared by the panels; ElementPath selections survive re-parses
     views.cpp           node view (panorama via Renderer + hotspot overlay, drag to move/resize/draw, snap 5), zoom view, map
     panels.cpp          outline tabs (world, items, talk, choices, music, text, code, assets), inspector, problems, code editor
+    newproject.*        --new template game (generated art: font from ImGui's ProggyClean, cursors, menu, test room), .res packer, panorama import, scream.sc from constants.hpp
     app.*, main.cpp     shell, layout, shortcuts, --check / play via the scream binary next to it; CLI --stats / --roundtrip
 tools/
   scream_res.py         list/extract .res archives

@@ -89,6 +89,12 @@ if(NOT MSVC)
   target_compile_options(imgui PRIVATE -w)
 endif()
 
+# The engine's SC_* constants as text, from which the editor writes a new game's scream.sc.
+file(READ src/constants.hpp SCREAM_CONSTANTS_TEXT)
+file(WRITE ${CMAKE_BINARY_DIR}/generated/constants_text.hpp
+  "#pragma once\n// Generated from src/constants.hpp by CMakeLists.txt.\ninline const char* kConstantsText = R\"sc(${SCREAM_CONSTANTS_TEXT})sc\";\n")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS src/constants.hpp)
+
 add_executable(scream-edit
   src/editor/main.cpp
   src/editor/app.cpp
@@ -96,8 +102,10 @@ add_executable(scream-edit
   src/editor/model.cpp
   src/editor/project.cpp
   src/editor/panels.cpp
-  src/editor/views.cpp)
+  src/editor/views.cpp
+  src/editor/newproject.cpp)
 target_link_libraries(scream-edit PRIVATE screamcore imgui)
+target_include_directories(scream-edit PRIVATE ${CMAKE_BINARY_DIR}/generated)
 
 foreach(t screamcore scream scream-edit)
   if(NOT MSVC)

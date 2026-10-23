@@ -11,6 +11,7 @@
 #include <sstream>
 
 #include "gl.hpp"
+#include "newproject.hpp"
 #include "ui.hpp"
 
 namespace editor {
@@ -187,6 +188,12 @@ ImTextureID App::imTexture(const std::string& name) {
 }
 
 std::filesystem::path App::writeTemp() {
+    // A project made here keeps its art in assets/: the engine reads it from game.res.
+    auto assets = p.scriptPath.parent_path() / "assets";
+    if (std::filesystem::is_directory(assets)) {
+        std::string error;
+        if (!packArchive(assets, p.scriptPath.parent_path() / "game.res", error)) status = error;
+    }
     auto dir = tempDir();
     auto path = dir / p.scriptPath.filename();
     std::ofstream f(path, std::ios::binary);
@@ -348,8 +355,15 @@ int runApp(const AppOptions& opts) {
 
         float menuH = 0;
         if (ImGui::BeginMainMenuBar()) {
+            static bool newProject = false;
             if (ImGui::BeginMenu("File")) {
+                if (ImGui::MenuItem("New game...")) newProject = true;
                 if (ImGui::MenuItem("Save", "Ctrl+S")) a.status = a.p.save() ? "saved" : a.p.error;
+                auto assets = a.p.scriptPath.parent_path() / "assets";
+                if (ImGui::MenuItem("Pack assets into game.res", nullptr, false, std::filesystem::is_directory(assets))) {
+                    std::string error;
+                    a.status = packArchive(assets, a.p.scriptPath.parent_path() / "game.res", error) ? "packed game.res" : error;
+                }
                 if (ImGui::MenuItem("Quit")) running = false;
                 ImGui::EndMenu();
             }
@@ -362,6 +376,28 @@ int runApp(const AppOptions& opts) {
                 if (ImGui::MenuItem("Play from here", "F5")) a.play();
                 if (ImGui::MenuItem("Check", "F6")) a.runCheck();
                 ImGui::EndMenu();
+            }
+            if (newProject) ImGui::OpenPopup("New game");
+            newProject = false;
+            if (ImGui::BeginPopupModal("New game", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+                static char dir[512] = "", title[128] = "Untitled";
+                ImGui::TextDisabled("an empty folder for the game: the template, placeholder art and all");
+                ImGui::InputText("folder", dir, sizeof dir);
+                ImGui::InputText("title", title, sizeof title);
+                if (ImGui::Button("Create")) {
+                    std::string error;
+                    std::filesystem::path d = dir;
+                    if (createProject(d, title, error) && a.p.load(d / "game.lua", {d})) {
+                        a.select({}), a.jumpTo("studio");
+                        a.status = "made " + d.string();
+                    } else {
+                        a.status = error.empty() ? a.p.error : error;
+                    }
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+                ImGui::EndPopup();
             }
             if (ImGui::MenuItem("View", nullptr, a.center == App::Center::View)) a.center = App::Center::View;
             if (ImGui::MenuItem("Map", nullptr, a.center == App::Center::Map)) a.center = App::Center::Map;

@@ -76,6 +76,9 @@ void approach(Rgb& c, const Rgb& target, float step) {
         c[i] = c[i] < target[i] ? std::min(target[i], c[i] + step) : std::max(target[i], c[i] - step);
 }
 
+
+}  // namespace
+
 // The 2006 engine's cloud texture, made at startup (P 0x40be00, 0x415cd0-
 // 0x416140): Hugo Elias style value noise. A 32x32 map of smoothed integer
 // noise (made three times, each with the next rand() % 5000 as its seed,
@@ -135,8 +138,6 @@ Image cloudTexture2006() {
     }
     return img;
 }
-
-}  // namespace
 
 bool Engine::flag(int f) const { return flags.count(f) != 0; }
 
