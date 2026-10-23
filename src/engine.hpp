@@ -349,6 +349,7 @@ private:
     // Alternate control (SC_FPS_STYLE, 0x4df8e10): the view follows the mouse's
     // offset from the screen centre, the pointer springs back to the centre.
     bool fpsStyle() const;
+    bool fpsSetting() const;  // the setup menu's switch, whatever slideshow mode does
     bool fpsActive() const;  // in a panorama, where it applies
     void fpsCamera(double dt, bool recenter = true);
     void recenterPointer(bool now);

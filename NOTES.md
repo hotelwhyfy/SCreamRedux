@@ -403,7 +403,9 @@ ECX), so Ghidra's decompiler hides arguments; read the disassembly alongside. Sc
   steps the view once and takes the click (`0x4173be`), even under scStill/scWait or with an
   item held: ±0.7855 rad sideways; up/down set y to ±2.0 (0 only from exactly ∓1.75, which
   doesn't happen). The zone shows its arrow cursor instead of hotspots (`0x414448`). With
-  alternate control on as well, a click applies one frame of that turn.
+  alternate control on as well, scream.exe keeps drawing the cursor in the middle while the
+  real pointer moves unseen, and the zones shrink to a pixel round the centre, so a click is
+  one frame of the alternate-control turn: an unusable pair (fixed here, see below).
 - Cursors (`0x40b400`): always a 64-pixel quad, reaching 8 px up-left of the pointer for the
   menu/forward/look cursors, 24 px for normal/use/zoom-out, centred otherwise (wait, arrows,
   items). The menu shows SC_MENU's cursor (`0x412ed9`), the journal "use" over the pages and
@@ -583,6 +585,13 @@ saves). Ghidra on `scream.exe` covers semantics the scripts don't reveal.
   generator (only caller found: P `0x415da3`); a different seed changes the pattern, not
   its character. `sky_def.tga` can't serve as a reference (it is a different texture).
 
+## Fixes of the original's problems
+
+- Slideshow mode with alternate control: slideshow mode wins (`Engine::fpsStyle`); the cursor
+  follows the mouse and edge clicks step 45°. In scream.exe the pair is unusable (see
+  Slideshow mode). The setup menu still shows and saves both switches as they are.
+- Two loops in smooth scLookAt that never end in scream.exe are made to finish.
+
 ## Deliberate differences from the original
 
 - The window scales the configured mode (WIDTH × HEIGHT) to fit; the original changed the
@@ -594,7 +603,6 @@ saves). Ghidra on `scream.exe` covers semantics the scripts don't reveal.
 - Setup choices (alternate control, hints, speeds, gamma, surround) persist in
   `settings.cfg`; the original forgets them (they only travel inside saved games).
 - Saved games and `scream.log` live in the user data folder, not the game folder.
-- Two loops in smooth scLookAt that never end in scream.exe are made to finish.
 - The setup launcher (`src/setup.cpp`; `--setup`, Option/Alt held at start, macOS
   Settings… ⌘,) edits the game's scream.cfg in place (backup `scream.cfg.orig`); it adds the
   port's own key WIDESCREEN (default 1), which scream.exe's parser skips like any unknown

@@ -556,7 +556,7 @@ bool Engine::saveSlot(int slot) {
     for (const auto& [at, f] : flagFields) st.i32(at, flag(f) ? 1 : 0);
     st.i32(set::DEBUG, int32_t(num(sc::DEBUG, 0)));
     st.str(set::LANGUAGE, text(sc::LANGUAGE, release2006 ? "gr" : "en"), 4);
-    st.i32(set::FPS_STYLE, fpsStyle() ? 1 : 0);
+    st.i32(set::FPS_STYLE, fpsSetting() ? 1 : 0);
     st.i32(set::SKY_COLOR, ambienceOf(sc::SKY_COLOR));
     st.i32(set::CLOUD_COLOR, ambienceOf(sc::CLOUD_COLOR));
     st.i32(set::SCREEN_COLOR, ambienceOf(sc::SCREEN_COLOR));

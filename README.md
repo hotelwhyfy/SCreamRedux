@@ -190,6 +190,12 @@ Not yet verified:
   setting, so they varied between PCs. Here a fade of F lasts F seconds from
   full volume, which is what the game's scripts and playlist were written for.
 
+Fixes of problems in the original:
+
+- Slideshow mode together with alternate control was unusable in the original
+  (the cursor stuck in the middle, clicks nudging the view). Here slideshow mode
+  wins: the cursor follows the mouse and edge clicks turn the view a step.
+
 Deliberate differences:
 
 - The screen mode is scaled to your window or display instead of switching the
@@ -198,4 +204,4 @@ Deliberate differences:
 - Loading a game starts from a clean start-of-game state before applying the
   file.
 
-Both lists are kept in full in [NOTES.md](NOTES.md).
+These lists are kept in full in [NOTES.md](NOTES.md).

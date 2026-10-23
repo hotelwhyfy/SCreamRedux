@@ -1266,16 +1266,11 @@ void Engine::panCamera(double dt) {
     setLook(yaw, std::clamp(pitchY, -kPitchLimit, kPitchLimit));
 }
 
-// One application of the camera function (0x407e20) for a slideshow click.
-// With alternate control on as well it is one frame of that turn; otherwise
+// One application of the camera function (0x407e20) for a slideshow click:
 // a quarter turn sideways, and up or down straight to a look y of 2.0, level
 // only when coming from exactly 1.75 (which in practice never happens).
 void Engine::slideshowStep() {
     camAnim_.active = false;
-    if (fpsStyle()) {
-        fpsCamera(1.0 / 60, false);
-        return;
-    }
     int w, h;
     SDL_GetWindowSizeInPixels(window_, &w, &h);
     Canvas c = Canvas::fit(w, h);
@@ -1312,7 +1307,15 @@ void Engine::getLook(float& yaw, float& y) const {
 
 float Engine::pitchLimit() const { return release2006 ? 1.57f : kPitchLimit; }
 
-bool Engine::fpsStyle() const {
+// Alternate control as it acts. A fix of this port: with slideshow mode on as
+// well, slideshow mode wins. In scream.exe both apply and the pair is
+// unusable: the cursor is drawn fixed in the middle while the real pointer
+// moves unseen (slideshow skips the recentring, 0x416a62; the sprite stays
+// at the centre, 0x416b91), and the edge zones shrink to a pixel round the
+// centre (0x40df60), so almost every click is a tiny alternate-control turn.
+bool Engine::fpsStyle() const { return fpsSetting() && !slideshow_; }
+
+bool Engine::fpsSetting() const {
     auto it = settings.find(sc::FPS_STYLE);
     auto* v = it == settings.end() ? nullptr : std::get_if<double>(&it->second);
     return v && *v != 0;
