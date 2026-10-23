@@ -41,7 +41,9 @@ bool Engine::canOpenInventory() const {
     return !locked && !scriptBusy() && !video_ && !choice_ && !journalOpen_ && view();
 }
 
+// Opening and closing crossfade like a view switch (0x4174d8, 0x417503).
 void Engine::openInventory() {
+    beginTransition();
     invOpen_ = true;
     held = nullptr;
     if (hintsActive())
@@ -49,6 +51,7 @@ void Engine::openInventory() {
 }
 
 void Engine::closeInventory() {
+    beginTransition();
     invOpen_ = false;
     if (held && hintsActive() && held->name == hints[sc::HINTS_ITEM])
         feedback(hints[sc::HINTS_CLOSE]);
@@ -151,7 +154,10 @@ void Engine::drawInventory() {
     }
 }
 
-void Engine::drawHeldCursor() {
+// The held item as the cursor (0x40b400, a 64 px quad). With `glow` (cursor
+// mode 0xcb) it is drawn twice more, added (SRC_ALPHA, ONE), the second time a
+// pixel larger all round: brighter over something it can be tried on.
+void Engine::drawHeldCursor(bool glow) {
     if (auto* t = renderer.texture(res, held->icon)) {
         float x, y;
         canvasMouse(x, y);
@@ -161,6 +167,11 @@ void Engine::drawHeldCursor() {
         }
         Box b = slotBox(0);
         renderer.drawImage(*t, x - b.w / 2, y - b.h / 2, b.w, b.h);
+        for (int i = 0; glow && i < 2; ++i) {
+            const float grow = float(i) * kVirtual;
+            renderer.drawImagePass(*t, x - b.w / 2 - grow, y - b.h / 2 - grow, b.w + 2 * grow, b.h + 2 * grow,
+                                   Renderer::Pass{1, 1, 1, 1, Blend::AddAlpha});
+        }
     }
 }
 

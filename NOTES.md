@@ -258,7 +258,10 @@ ECX), so Ghidra's decompiler hides arguments; read the disassembly alongside. Sc
   and from H−128. Rate per frame = depth_px × 0.005 × CAM_SPEED/1000 × ramp × 60/fps; ramp
   +0.025/frame, reset when the view stops. CAM_SPEED is 25/50/75. Keyboard steps 0.7855 rad.
   `SC_FPS_STYLE` ("alternate control", `0x4df8e10`; the DC manual's "fixed mouse movement")
-  selects a cursor-offset look mode (ported: `Engine::fpsCamera`): zones shrink to W/2±1, H/2±1 (`0x40df60`); per frame yaw ∓= (W/2∓1 − x)·0.0003,
+  selects a cursor-offset look mode (ported: `Engine::fpsCamera`; on macOS the system pointer
+  is captured in relative mode and our own pointer springs back, because moving the system
+  pointer back every frame makes quick mouse movements trigger "shake to locate"): zones
+  shrink to W/2±1, H/2±1 (`0x40df60`); per frame yaw ∓= (W/2∓1 − x)·0.0003,
   pitch ±= (H/2∓1 − y)·0.0003 (clamped by checking pitch ≤ 1.75 / ≥ −2.0 first), with no
   CAM_SPEED, ramp or frame-time factor (`0x407e20`); every >30 ms the main loop moves the
   pointer 1/10 of the way (≥ 1 px) back to the centre with SetCursorPos (`0x416a8c`) and the
@@ -314,7 +317,15 @@ ECX), so Ghidra's decompiler hides arguments; read the disassembly alongside. Sc
   The book opens at the page last shown.
 - Inventory grid (hit test `0x417c90`, state 0xfa3): slot (row, col) at x = 32 + col·(32 +
   size), y = 64 + 96·row, size×size, 10 per row (1024×768 pixels). The inventory draw itself
-  shows no text; our hover label is an addition.
+  shows no text; our hover label is an addition. Opening and closing crossfade like a view
+  switch (capture `0x407ad0` at `0x4174e7` / `0x417512`, then state 0xfa3 / 0xfa6); it doesn't
+  open in a dream (SC_DREAM, `0x4df8dfc`) or with nothing in slot 1 (`0x403d20(1)`).
+- Cursor (`0x40b400`, set by `0x40b6f0`: 0xc9–0xcb set the mode `0x48bad8`, other values the
+  image `0x48bad4`; ≥ 0x41 is an item icon, a 64 px quad). Mode 0xcb draws the image twice
+  more added (SRC_ALPHA, ONE), the second a pixel larger all round: the held item brightens.
+  That happens with an item held over a hotspot whose click is SC_FEEDBACK, SC_CUSTOM or
+  SC_FEEDBACK_EX (`0x414582`, node and zoom alike, whether or not the item has a reaction
+  there; not over navigation), and in the inventory over another item (`0x4140fe`).
 - Menu (ported in `src/menu.cpp`; renderer `0x408550`, hit test `0x417c90`, click/hover
   `0x413640`, prompts `0x412fa0`/`0x40b250`/`0x413e70`, open `0x412cb0`, close `0x4130d0`).
   Modes at menu+0x260: 0 main, 1 load, 2 save, 4 setup; the renderer also takes −1 (main, no
@@ -406,8 +417,7 @@ ECX), so Ghidra's decompiler hides arguments; read the disassembly alongside. Sc
   = 0). Each screen's renderer then draws the capture over the view area (between the bars)
   at alpha 1 − progress and adds SC_MOV_SPEED (`0x4df8d10`, key 1018, default 25, LO/MED/HI →
   25/50/75)·0.001 per frame (×60/fps). `0x407b20` starts at 0.75 (hotkey handler). The intros
-  set SC_MOV_SPEED 2 for ~8 s fades. Whether the inventory crossfades is not known (no capture
-  found for it).
+  set SC_MOV_SPEED 2 for ~8 s fades. The inventory crossfades too (see Inventory grid).
 
 ### Effects (from `scream.exe`, implemented in `src/effects.cpp`)
 
@@ -458,4 +468,3 @@ saves). Ghidra on `scream.exe` covers semantics the scripts don't reveal.
   before entering a room, so `changeTime`'s `scGet(SC_ROOM)` is empty and its
   `scBind(SC_ROOM, aux)` finds nothing (the DC swapped the two calls). In the DC exe that
   `scGet` would be the fatal "GetCurr: target not bound", so the 2006 exe must differ there.
-- Whether the inventory screen opens/closes with a crossfade.

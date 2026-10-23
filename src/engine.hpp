@@ -263,7 +263,7 @@ private:
     void drawInventory();
     void journalClick();
     void drawJournal();
-    void drawHeldCursor();
+    void drawHeldCursor(bool glow);
 
     // Sky, weather and lighting (effects.cpp).
     struct Effects {
@@ -296,6 +296,8 @@ private:
     bool fpsActive() const;  // in a panorama, where it applies
     void fpsCamera(double dt);
     void recenterPointer(bool now);
+    void updateRelativeMouse();
+    bool relativeMouse_ = false;
     void drawCursor(Object* hover, int edge);
     // Where a zoom image is drawn on the 800x600 canvas. Hotspots are authored
     // in a logical 800x472 space spanning the whole image, whatever its pixel

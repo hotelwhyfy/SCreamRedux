@@ -47,11 +47,10 @@ a failed `scBind` unbinds; rooms remember the last node; view switches release `
 3. 2006 executable: compare its behaviour (and the 2006 patch's) with the DC one
    where it matters (menu without the game choice, no journal/subtitles/ambience
    API in 2006 scripts).
-4. Whether the inventory screen crossfades in the original (not checked).
-5. Approximations: sky dome geometry/tiling and dusk intensity; playlist per-track
+4. Approximations: sky dome geometry/tiling and dusk intensity; playlist per-track
    repeat/fade fields; original save format unknown (ours is incompatible);
    `scTimerCreate` timers are cancelled on node change (assumption).
-6. The user's own play-through for feel and audio (automated runs are silent and
+5. The user's own play-through for feel and audio (automated runs are silent and
    draw almost nothing).
 
 ## Layout

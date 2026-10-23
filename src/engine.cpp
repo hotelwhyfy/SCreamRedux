@@ -934,8 +934,15 @@ void Engine::handleEvent(const SDL_Event& e) {
         break;
     }
     case SDL_EVENT_MOUSE_MOTION:
-        mouseX_ = e.motion.x;
-        mouseY_ = e.motion.y;
+        if (relativeMouse_) {  // alternate control: our own pointer, moved by the deltas
+            int w, h;
+            SDL_GetWindowSize(window_, &w, &h);
+            mouseX_ = std::clamp(mouseX_ + e.motion.xrel, 0.0f, float(w - 1));
+            mouseY_ = std::clamp(mouseY_ + e.motion.yrel, 0.0f, float(h - 1));
+        } else {
+            mouseX_ = e.motion.x;
+            mouseY_ = e.motion.y;
+        }
         // Middle-drag look is an addition of this port; it obeys the same gates as edge panning.
         if (dragging_ && motion && !locked && !camAnim_.active && !(view() && view()->isZoom)) {
             cam.yaw = wrap180(cam.yaw - e.motion.xrel * 0.25f);
@@ -1046,8 +1053,23 @@ void Engine::recenterPointer(bool now) {
         return;
     mouseX_ = x;
     mouseY_ = y;
-    if (SDL_GetMouseFocus() == window_)  // never move the pointer while it is elsewhere (test runs)
+    // In relative mode the system pointer is captured and only ours moves.
+    if (!relativeMouse_ && SDL_GetMouseFocus() == window_)  // never move it while it is elsewhere (test runs)
         SDL_WarpMouseInWindow(window_, x, y);
+}
+
+// scream.exe springs the system pointer back with SetCursorPos. Doing that on
+// macOS makes a quick back-and-forth count as "shake to locate", which shows a
+// huge pointer; so while alternate control drives the view, the system pointer
+// is captured (relative mode) and the pointer that springs back is our own.
+void Engine::updateRelativeMouse() {
+    const bool want = fpsActive() && !opts.turbo && SDL_GetKeyboardFocus() == window_;
+    if (want == relativeMouse_)
+        return;
+    relativeMouse_ = want;
+    SDL_SetWindowRelativeMouseMode(window_, want);
+    if (!want)
+        SDL_WarpMouseInWindow(window_, mouseX_, mouseY_);  // the system pointer reappears where ours was
 }
 
 void Engine::update(double dt) {
@@ -1104,7 +1126,20 @@ void Engine::drawCursor(Object* hover, int edge) {
     if (capturing_) return;
     if (aborted_ || (locked && !waitMode && !menuOpen())) return;
     if (held && !locked && !menuOpen()) {
-        drawHeldCursor();
+        // Cursor mode 0xcb (0x414582, 0x4140fe): over a hotspot whose click is
+        // feedback or a handler (not navigation), or in the inventory over
+        // another item.
+        bool glow;
+        if (invOpen_) {
+            float x, y;
+            canvasMouse(x, y);
+            int slot = slotAt(x, y);
+            glow = slot >= 0 && inventory[size_t(slot)] != held;
+        } else {
+            glow = hover && (hover->click.kind == sc::FEEDBACK || hover->click.kind == sc::CUSTOM ||
+                             hover->click.kind == sc::FEEDBACK_EX);
+        }
+        drawHeldCursor(glow);
         return;
     }
     if (menuOpen() && menuBlackUntil_ > 0 && flag(sc::WAIT)) kind = sc::WAIT;  // the menu's scSleep
@@ -1261,6 +1296,7 @@ void Engine::run() {
         if (!menuOpen())
             gameClock_ += dt;
         textClock_ += dt;
+        updateRelativeMouse();
         update(dt);
         if (opts.crawl && !crawlStep())
             quit_ = true;
