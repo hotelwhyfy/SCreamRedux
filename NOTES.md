@@ -566,6 +566,23 @@ saves). Ghidra on `scream.exe` covers semantics the scripts don't reveal.
 - The net effect of the reader's ZOOM + ZOOMOUT after loading a game saved in a zoom (the
   zoom stack is restored as saved).
 - Saved games are untested against files from the original executables (none available).
+- The 2006 cloud texture assumes Watcom's `rand()` is unseeded and uncalled before the
+  generator (only caller found: P `0x415da3`); a different seed changes the pattern, not
+  its character. `sky_def.tga` can't serve as a reference (it is a different texture).
+
+## Deliberate differences from the original
+
+- The window scales the configured mode (WIDTH × HEIGHT) to fit; the original changed the
+  display mode in fullscreen and laid out in real pixels in a window.
+- Loading a saved game first restores the start-of-game baseline; scream.exe leaves whatever
+  the file doesn't cover (non-numeric globals, choice lists) as it was in memory.
+- Setup choices (alternate control, hints, speeds, gamma, surround) persist in
+  `settings.cfg`; the original forgets them (they only travel inside saved games).
+- Saved games and `scream.log` live in the user data folder, not the game folder.
+- Two loops in smooth scLookAt that never end in scream.exe are made to finish.
+- Additions: middle-drag look, F11 screenshot, the captured pointer for alternate control on
+  macOS (the original's SetCursorPos recentring triggers "shake to locate"), the macOS
+  fullscreen menu bar suppressed, and the test tools (`--check`, `--crawl`, `--explore`, …).
 - The 2006 `newGame` calls `changeTime(9)` before entering a room, so `scGet(SC_ROOM)` is the
   empty room slot 0 and `scBind(SC_ROOM, "")` finds nothing; GetCurr doesn't check the slot
   (P `0x403710`, D `0x4037d0`), so this isn't fatal in either exe.
