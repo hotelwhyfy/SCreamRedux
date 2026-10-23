@@ -93,7 +93,10 @@ add_executable(scream-edit
   src/editor/main.cpp
   src/editor/app.cpp
   src/editor/luadoc.cpp
-  src/editor/model.cpp)
+  src/editor/model.cpp
+  src/editor/project.cpp
+  src/editor/panels.cpp
+  src/editor/views.cpp)
 target_link_libraries(scream-edit PRIVATE screamcore imgui)
 
 foreach(t screamcore scream scream-edit)

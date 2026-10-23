@@ -39,6 +39,9 @@ struct Camera {
 
 // World-space direction through window pixel (px, py).
 Vec3 viewRay(const Camera& cam, float px, float py, int width, int height);
+// Window pixel where a world-space direction appears (the inverse of viewRay);
+// false when it is behind the camera.
+bool projectPoint(const Camera& cam, Vec3 dir, int width, int height, float& px, float& py);
 // Which face a direction hits and where, in face pixels (0..texSize).
 bool pickFace(Vec3 dir, int& face, float& x, float& y, int texSize);
 

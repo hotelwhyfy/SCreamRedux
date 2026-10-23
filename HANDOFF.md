@@ -84,7 +84,11 @@ src/
   editor/               scream-edit (plan: ~/.claude/plans/we-have-the-game-abundant-wozniak.md)
     luadoc.*            Lua tokenizer/parser: top-level items with spans; builder bodies as calls
     model.*             builder calls folded into elements (scCreate + props, scBegin/scEnd children); writer in the original layout
-    app.*, main.cpp     ImGui window; CLI --stats / --roundtrip
+    project.*           the edited script: commit = write dirty builders + re-parse; undo = stack of texts; resource mounts
+    ui.hpp              App state shared by the panels; ElementPath selections survive re-parses
+    views.cpp           node view (panorama via Renderer + hotspot overlay, drag to move/resize/draw, snap 5), zoom view, map
+    panels.cpp          outline tabs (world, items, talk, choices, music, text, code, assets), inspector, problems, code editor
+    app.*, main.cpp     shell, layout, shortcuts, --check / play via the scream binary next to it; CLI --stats / --roundtrip
 tools/
   scream_res.py         list/extract .res archives
   api_usage.py          catalogue sc* usage in decompiled scripts -> docs/api-usage-*.md
@@ -141,6 +145,9 @@ Always pass `--save-dir DIR` (a temp dir) so tests don't touch the user's saves/
   globals); two scripts that build the same world give the same file. Editor round trip:
   `scream-edit --roundtrip IN.lua OUT.lua`, then dump with `--data DIR_WITH_OUT --script OUT.lua`
   and diff against the shipped script's dump.
+- Editor UI tests: `scream-edit --data … SCRIPT.lua --open ROOM/VIEW/OBJECT --input "FRAME ACTION ARGS; …"
+  --frames N --screenshot FILE` (synthetic mouse/keys in window points; `key ctrl+s` saves). Edit a copy of
+  the decompiled script, never `extracted/decompiled/*` itself.
 - `--crawl`: every hotspot click, item reaction, choice and dialogue from the start state;
   reports warnings/Lua errors per task (~2 min).
 - `--explore` / `--explore-hints FILE`: an automated player that plays a campaign until

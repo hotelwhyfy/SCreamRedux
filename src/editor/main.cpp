@@ -23,7 +23,17 @@ void usage() {
         "  SCRIPT.lua         the game script to edit (default: the data's SCRIPT.lua)\n"
         "  --data DIR         data directories for images and sounds (repeatable)\n"
         "  --stats SCRIPT     print what the parser finds in a script\n"
-        "  --roundtrip IN OUT regenerate every builder function of IN into OUT\n");
+        "  --roundtrip IN OUT regenerate every builder function of IN into OUT\n"
+        "\n"
+        "testing:\n"
+        "  --open ROOM[/VIEW[/OBJECT]]  open that place\n"
+        "  --center map|code:NAME|asset:NAME  show that instead of the view\n"
+        "  --yaw DEG          initial view direction\n"
+        "  --window WxH       window size\n"
+        "  --screenshot FILE  write a PNG of the window after a few frames, then quit\n"
+        "  --frames N         take it at frame N (default 20)\n"
+        "  --input SCRIPT     synthetic input, \"FRAME ACTION ARGS; ...\": move X Y, down [1|3],\n"
+        "                     up [1|3], wheel DY, key [ctrl+][shift+]NAME (window points)\n");
 }
 
 bool readFile(const std::string& path, std::string& out) {
@@ -125,6 +135,17 @@ int main(int argc, char** argv) {
             return roundtrip(in, next());
         }
         if (a == "--data") opts.dataDirs.emplace_back(next());
+        else if (a == "--open") opts.open = next();
+        else if (a == "--center") opts.center = next();
+        else if (a == "--yaw") opts.yaw = std::stof(next());
+        else if (a == "--screenshot") opts.screenshot = next();
+        else if (a == "--input") opts.input = next();
+        else if (a == "--frames") opts.quitAt = std::stoi(next());
+        else if (a == "--window") {
+            std::string v = next();
+            opts.width = std::stoi(v);
+            opts.height = std::stoi(v.substr(v.find('x') + 1));
+        }
         else if (a == "-h" || a == "--help") return usage(), 0;
         else if (!a.empty() && a[0] != '-') opts.script = a;
         else {

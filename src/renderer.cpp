@@ -164,6 +164,21 @@ Vec3 viewRay(const Camera& cam, float px, float py, int width, int height) {
             v[8] * d.x + v[9] * d.y + v[10] * d.z};
 }
 
+bool projectPoint(const Camera& cam, Vec3 p, int width, int height, float& px, float& py) {
+    Mat4 v = viewMatrix(cam);
+    p.y *= cam.boxY;
+    float cx = v[0] * p.x + v[4] * p.y + v[8] * p.z;
+    float cy = v[1] * p.x + v[5] * p.y + v[9] * p.z;
+    float cz = v[2] * p.x + v[6] * p.y + v[10] * p.z;
+    if (cz > -1e-3f)
+        return false;
+    float t = std::tan(rad(cam.fovY) / 2);
+    float aspect = float(width) / float(height) * cam.aspectScale;
+    px = (cx / -cz / (t * aspect) + 1) / 2 * width;
+    py = (1 - cy / -cz / t) / 2 * height;
+    return true;
+}
+
 bool pickFace(Vec3 dir, int& face, float& x, float& y, int texSize) {
     float best = 0;
     face = 0;
