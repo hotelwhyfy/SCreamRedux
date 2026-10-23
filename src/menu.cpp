@@ -341,12 +341,15 @@ void Engine::drawMenuBackground() {
         w = 1312.0f * float(t->width) / 1024, h = 1389.0f * float(t->height) / 1024;
         x = 0, y = float(gMode.h - 704);
     }
+    // The DC's quad is a pixel wider than the screen; the screen edge cut it off.
+    const float u1 = x + w > gMode.w ? (gMode.w - x) / w : 1.0f;
+    w *= u1;
     x *= gMode.px, y *= gMode.px, w *= gMode.px, h *= gMode.px;
-    renderer.drawImageUV(*t, x, y, w, h, 0, 0, 1, 1, 1, 1, 1, 1, Blend::AddOne);
+    renderer.drawImageUV(*t, x, y, w, h, 0, 0, u1, 1, 1, 1, 1, 1, Blend::AddOne);
     // The clouds go through the 3D view, which in scream.exe is only as wide as
     // its 4:3 mode: keep them to the canvas, not the full width of a wide window.
     drawClouds(canvasViewport());
-    renderer.drawImage(*t, x, y, w, h);
+    renderer.drawImageUV(*t, x, y, w, h, 0, 0, u1, 1);
 }
 
 void Engine::drawMenu() {

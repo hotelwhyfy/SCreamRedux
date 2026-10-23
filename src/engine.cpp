@@ -703,8 +703,11 @@ Viewport Engine::canvasViewport() const {
     int w, h;
     SDL_GetWindowSizeInPixels(window_, &w, &h);
     const Canvas c = Canvas::fit(w, h);
-    vp.x = int(c.x);
-    vp.w = int(sc::SCREEN_W * c.scale);
+    // Rounded as the image's own pixels are (by pixel centre), so the backdrop
+    // covers exactly the columns the 2D image does.
+    const int left = int(std::lround(c.x)), right = int(std::lround(c.x + sc::SCREEN_W * c.scale));
+    vp.x = left;
+    vp.w = right - left;
     return vp;
 }
 
