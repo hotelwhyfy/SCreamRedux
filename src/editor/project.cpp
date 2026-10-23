@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <regex>
 #include <sstream>
 
 namespace editor {
@@ -104,6 +105,41 @@ void Project::reindex() {
             else if (k == "SC_OVERLAY") overlays.push_back(r);
         }
     }
+}
+
+const std::map<std::string, std::vector<Project::Move>>& Project::moves() {
+    if (movesVersion_ == version) return moves_;
+    movesVersion_ = version;
+    moves_.clear();
+    static const std::regex call(R"(\b([A-Za-z_]\w*)\s*\()");
+    static const std::regex any(R"re(scSwitch\(\s*(SC_ROOM|SC_NODE|SC_ZOOM)\s*,\s*"([^"]+)"|scSetLastVisited\(\s*"([^"]+)")re");
+    std::map<std::string, std::vector<Move>> direct;
+    std::map<std::string, std::vector<std::string>> calls;
+    for (const auto& it : doc.items) {
+        if (it.kind != doc::Item::Kind::Function || it.builder) continue;
+        std::string src = doc.text(it.begin, it.end);
+        // In order, so a scSetLastVisited applies to the room switch after it.
+        std::string pending;
+        for (std::sregex_iterator m(src.begin(), src.end(), any), e; m != e; ++m) {
+            if ((*m)[3].matched) {
+                pending = (*m)[3];
+                continue;
+            }
+            Move mv{(*m)[1], (*m)[2], (*m)[1] == "SC_ROOM" ? pending : std::string()};
+            if (mv.kind == "SC_ROOM") pending.clear();
+            direct[it.name].push_back(mv);
+        }
+        for (std::sregex_iterator m(src.begin(), src.end(), call), e; m != e; ++m)
+            if ((*m)[1] != it.name) calls[it.name].push_back((*m)[1]);
+    }
+    for (const auto& h : handlers) {
+        auto& v = moves_[h];
+        if (auto d = direct.find(h); d != direct.end()) v = d->second;
+        if (auto c = calls.find(h); c != calls.end())
+            for (const auto& callee : c->second)
+                if (auto d = direct.find(callee); d != direct.end()) v.insert(v.end(), d->second.begin(), d->second.end());
+    }
+    return moves_;
 }
 
 model::Builder* Project::builder(const std::string& name) {

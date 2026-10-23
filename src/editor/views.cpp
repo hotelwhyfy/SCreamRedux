@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
-#include <regex>
 #include <set>
 
 #include "ui.hpp"
@@ -554,39 +553,10 @@ int drawGraph(const std::vector<GraphBox>& boxes, const std::vector<GraphLink>& 
     return clicked;
 }
 
-// The rooms a handler switches to: its own scSwitch(SC_ROOM, "...") calls and
-// those of the handlers it calls (one level: door handlers are short).
-const std::map<std::string, std::vector<std::string>>& roomSwitches(App& a) {
-    static int version = -1;
-    static std::map<std::string, std::vector<std::string>> out;
-    if (version == a.p.version) return out;
-    version = a.p.version;
-    out.clear();
-    static const std::regex sw(R"re(scSwitch\(\s*SC_ROOM\s*,\s*"([^"]+)")re"), call(R"(\b([A-Za-z_]\w*)\s*\()");
-    std::map<std::string, std::vector<std::string>> direct, calls;
-    for (const auto& it : a.p.doc.items) {
-        if (it.kind != doc::Item::Kind::Function || it.builder) continue;
-        std::string src = a.p.doc.text(it.begin, it.end);
-        for (std::sregex_iterator m(src.begin(), src.end(), sw), e; m != e; ++m) direct[it.name].push_back((*m)[1]);
-        for (std::sregex_iterator m(src.begin(), src.end(), call), e; m != e; ++m)
-            if ((*m)[1] != it.name) calls[it.name].push_back((*m)[1]);
-    }
-    for (const auto& h : a.p.handlers) {
-        auto& v = out[h];
-        if (auto d = direct.find(h); d != direct.end()) v = d->second;
-        if (auto c = calls.find(h); c != calls.end())
-            for (const auto& callee : c->second)
-                if (auto d = direct.find(callee); d != direct.end()) v.insert(v.end(), d->second.begin(), d->second.end());
-        std::sort(v.begin(), v.end());
-        v.erase(std::unique(v.begin(), v.end()), v.end());
-    }
-    return out;
-}
-
 // The whole game: rooms, linked by hotspots that change room (SC_ROOM, or a
 // handler that calls scSwitch(SC_ROOM)), from the room the new-game handlers enter.
 void worldMap(App& a) {
-    const auto& sw = roomSwitches(a);
+    const auto& moves = a.p.moves();
     std::vector<GraphBox> boxes;
     std::map<std::string, size_t> index;
     for (auto& r : a.p.rooms) {
@@ -607,8 +577,9 @@ void worldMap(App& a) {
         std::string kind = c.args[k].src, target = a.p.resolve(c.args[k + 1]);
         if (kind == "SC_ROOM") link(from, target, where);
         if (kind == "SC_CUSTOM")
-            if (auto s = sw.find(target); s != sw.end())
-                for (const auto& room : s->second) link(from, room, where + " (" + target + ")");
+            if (auto m = moves.find(target); m != moves.end())
+                for (const auto& mv : m->second)
+                    if (mv.kind == "SC_ROOM") link(from, mv.target, where + " (" + target + ")");
     };
     for (size_t ri = 0; ri < a.p.rooms.size(); ++ri) {
         model::Element& room = *a.p.rooms[ri].e;
@@ -628,9 +599,9 @@ void worldMap(App& a) {
     for (const auto& it : a.p.doc.items)
         if (it.kind == doc::Item::Kind::Call && it.call && it.call->fn == "scMenuSet")
             for (size_t k = 7; k < it.call->args.size(); ++k)
-                if (auto s = sw.find(a.p.resolve(it.call->args[k])); s != sw.end())
-                    for (const auto& room : s->second)
-                        if (auto i = index.find(room); i != index.end()) roots.push_back(i->second);
+                if (auto m = moves.find(a.p.resolve(it.call->args[k])); m != moves.end())
+                    for (const auto& mv : m->second)
+                        if (auto i = index.find(mv.target); mv.kind == "SC_ROOM" && i != index.end()) roots.push_back(i->second);
     if (roots.empty() && !boxes.empty()) roots.push_back(0);
     ImGui::TextDisabled("columns: steps from where a new game starts (%s)   double-click: open the room   red: no "
                         "hotspot leads there (a handler, a cutscene or another game may)",
@@ -675,9 +646,21 @@ void roomMap(App& a, model::Element& room) {
             auto* c = o.find("scOnClick");
             if (!c || c->args.size() < 2) continue;
             std::string k = c->args[0].src, t = a.p.resolve(c->args[1]);
-            auto it = byName.find((k == "SC_NODE" ? "SC_NODE" : "SC_ZOOM") + t);
-            if ((k == "SC_NODE" || k == "SC_ZOOM") && it != byName.end() && it->second != b) links.push_back({b, it->second});
-            if (k == "SC_ROOM") exits.push_back(boxes[b].name + " -> " + t);
+            auto to = [&](const std::string& kind, const std::string& target, const std::string& how) {
+                auto it = byName.find(kind + target);
+                if (it == byName.end() || it->second == b) return;
+                links.push_back({b, it->second});
+                tips[b] += "\n" + o.name() + how + " -> " + target;
+            };
+            if (k == "SC_NODE" || k == "SC_ZOOM") to(k, t, "");
+            if (k == "SC_ROOM") exits.push_back(boxes[b].name + "/" + o.name() + " -> " + t);
+            // Steps, ladders and doors that animate first: a handler that calls scSwitch.
+            if (k == "SC_CUSTOM")
+                if (auto m = a.p.moves().find(t); m != a.p.moves().end())
+                    for (const auto& mv : m->second) {
+                        if (mv.kind == "SC_ROOM") exits.push_back(boxes[b].name + "/" + o.name() + " (" + t + ") -> " + mv.target);
+                        else to(mv.kind, mv.target, " (" + t + ")");
+                    }
         }
     }
     std::vector<size_t> roots;
@@ -686,13 +669,14 @@ void roomMap(App& a, model::Element& room) {
             roots.push_back(i);
             break;
         }
-    ImGui::TextDisabled("columns: steps from %s   green: nodes   purple: zooms   red: a node no hotspot leads to",
+    ImGui::TextDisabled("columns: steps from %s   green: nodes   purple: zooms   red: a node nothing here leads to",
                         roots.empty() ? "-" : boxes[roots[0]].name.c_str());
     for (auto& e : exits) ImGui::TextDisabled("exit %s", e.c_str());
     ImVec2 r0 = ImGui::GetCursorScreenPos();
     ImVec2 extent = layoutGraph(boxes, links, roots, r0);
     for (size_t i = 0; i < boxes.size(); ++i)
-        if (!boxes[i].reached) tips[i] += "\nno hotspot in this room leads here (a handler may)";
+        if (!boxes[i].reached)
+            tips[i] += "\nno hotspot in this room leads here, nor a handler one runs (other code may: scSwitch)";
     int selected = -1;
     for (size_t i = 0; i < boxes.size(); ++i) {
         ElementPath vp = a.room;

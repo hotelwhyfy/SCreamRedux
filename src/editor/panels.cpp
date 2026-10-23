@@ -252,6 +252,23 @@ bool actionEditor(App& a, doc::Call& c, size_t k) {
             a.handler = h;
             a.center = App::Center::Handler;
         }
+        // Where it leads, read from its code (scSwitch), as the maps do.
+        if (auto m = a.p.moves().find(h); m != a.p.moves().end())
+            for (const auto& mv : m->second) {
+                if (mv.kind == "SC_NODE") ImGui::TextDisabled("  goes to node %s", mv.target.c_str());
+                else if (mv.kind == "SC_ZOOM") ImGui::TextDisabled("  opens zoom %s", mv.target.c_str());
+                else if (!mv.node.empty()) ImGui::TextDisabled("  goes to room %s, node %s", mv.target.c_str(), mv.node.c_str());
+                else {
+                    // No node named: the engine enters the room at the node the player
+                    // was last in there, the first time at its first node.
+                    std::string first;
+                    for (auto& r : a.p.rooms)
+                        if (r.e->name() == mv.target)
+                            if (auto n = names(r.e, "SC_NODE"); !n.empty()) first = n[0];
+                    ImGui::TextDisabled("  goes to room %s, at its last visited node", mv.target.c_str());
+                    ImGui::TextDisabled("  (the first time: %s)", first.empty() ? "?" : first.c_str());
+                }
+            }
         changed |= argField(a, "name##handler", target);
     } else if (kind.src == "SC_FEEDBACK" || kind.src == "SC_FEEDBACK_EX") {
         changed |= textArg(a, "text", target);

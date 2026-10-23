@@ -47,6 +47,15 @@ public:
     std::map<std::string, std::string> texts;  // the text table: global -> text
     std::vector<std::string> handlers;         // functions that aren't builders
 
+    // Where a handler takes the player: its scSwitch(SC_ROOM / SC_NODE / SC_ZOOM,
+    // "name") calls, and those of the handlers it calls (one level: door
+    // handlers are short). `node` is a scSetLastVisited("n") made before a
+    // room switch: the node the room opens at.
+    struct Move {
+        std::string kind, target, node;
+    };
+    const std::map<std::string, std::vector<Move>>& moves();
+
     model::Element* find(const ElementPath& p);
     model::Builder* builder(const std::string& name);
     // A string argument's text, or the text global it names.
@@ -80,6 +89,8 @@ private:
     void mount();
     std::string text_, savedText_;
     std::vector<std::string> undo_, redo_;
+    std::map<std::string, std::vector<Move>> moves_;
+    int movesVersion_ = -1;
 };
 
 }  // namespace editor
