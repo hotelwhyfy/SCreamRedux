@@ -601,7 +601,10 @@ saves). Ghidra on `scream.exe` covers semantics the scripts don't reveal.
 - Loading a saved game first restores the start-of-game baseline; scream.exe leaves whatever
   the file doesn't cover (non-numeric globals, choice lists) as it was in memory.
 - Setup choices (alternate control, hints, speeds, gamma, surround) persist in
-  `settings.cfg`; the original forgets them (they only travel inside saved games).
+  `settings.cfg`; the original forgets them at startup. Otherwise as the original: every
+  saved game carries all the setup choices in its settings block, and loading it brings them
+  back (that game's gamma, speeds, hints, surround, alternate control, slideshow); slideshow
+  mode itself isn't kept between sessions (off at startup, `0x40f465`).
 - Saved games and `scream.log` live in the user data folder, not the game folder.
 - The setup launcher (`src/setup.cpp`; `--setup`, Option/Alt held at start, macOS
   Settings… ⌘,) edits the game's scream.cfg in place (backup `scream.cfg.orig`); it adds the

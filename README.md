@@ -152,7 +152,9 @@ whatever the game script gives it, such as "Garden, Day 1, 10am". This port's
 earlier `slotN.sav` files still load.
 
 Setup choices are kept in `settings.cfg` in the same folder (the original
-forgot them).
+forgot them), except slideshow mode, which starts off each time as in the
+original. As in the original, a saved game also stores the setup choices made
+while playing it, and loading it brings them back.
 
 ## Command line
 
