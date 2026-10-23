@@ -50,7 +50,8 @@ Engine::Engine(Options o) : opts(std::move(o)) {
     settings[sc::RES_FILE] = config.resource;  // "game.res" until the script or cfg names one
     settings[sc::RES_PATH] = config.path;
     settings[sc::SHOW_HOTSPOTS] = opts.hotspots ? 1.0 : 0.0;
-    flags.insert(sc::WAIT);  // enabled by default in scream.exe (0x40f260)
+    flags.insert(sc::WAIT);  // both enabled by default in scream.exe (0x40f38e, 0x40f3a2),
+    flags.insert(sc::SKY);   // so the opening garden has its sky before any scEnable(SC_SKY)
     applyConfig();
     loadSettings("scream.cfg");  // at startup, before the scripts (0x4061d0)
 }

@@ -510,6 +510,10 @@ ECX), so Ghidra's decompiler hides arguments; read the disassembly alongside. Sc
   share the dome's uv, scrolled on v by 5e-5·int(SKY_SPEED/10) per frame; SKY_SPEED defaults
   to 15 (`0x40f370`). Layer 2 is the cloud colour −0.05; they crossfade (0.002/frame, pauses
   0.015) between 0.5 and 1. Rain scrolls 0.035/frame.
+- SC_SKY and SC_WAIT start enabled (`0x40f3a2`, `0x40f38e`; same in the 2006 exes): the DC
+  main game's opening garden has its sky before the script ever calls scEnable(SC_SKY). It
+  starts at 9 am, which `changeTime` sets to DAWN at once (sky, clouds and screen tint), the
+  orange opening; 10 am fades clouds and tint to MORNING, 11 am the sky.
 - Presets (sky / horizon / clouds): DAWN (1,.8,.55)/(.8,.05,.05)/(1,.7,.55); MORNING
   (.9,.9,.9)/(.55,.65,.8)/(.75,.75,.75); DUSK (.45,.5,.6)/(1,0,0)/(.95,.55,.45); STORM
   (.7,.7,.9)/(.15,.15,.8)/(.3,.3,.3). Changes fade at 0.0001/frame (the cloud colour twice, once
