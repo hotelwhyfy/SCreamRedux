@@ -91,6 +91,19 @@ original reads it, and every key takes effect:
 The shipped files ask for fullscreen. Pass `--windowed` (or `--window WxH`) to
 run in a window.
 
+**Setup launcher.** Rather than editing the file by hand, open the setup window:
+start with `--setup`, hold Option (macOS) or Alt (Windows) while the game starts,
+or, on macOS, choose *Settings…* (⌘,) in the application menu while playing,
+which opens it in a separate window next to the game. It edits the game's own
+`scream.cfg` in place, keeping its comments, and keeps the shipped file as
+`scream.cfg.orig` the first time you save. *reset* brings the shipped values back.
+Click a setting (right-click to go back), or use the arrow keys and Return. It
+also has this port's one addition to the file, `WIDESCREEN`: when it's on,
+panoramas fill a window wider than 4:3; when it's off, they keep the original's
+4:3 with black sides, like everything else. The original's own parser skips the
+key, so the file still works with the original game. Changes take effect the
+next time the game starts.
+
 ## Playing
 
 Mouse:
@@ -143,6 +156,7 @@ forgot them).
 ```
 --data DIR              a data directory (repeatable; later ones win)
 --windowed / --fullscreen / --window WxH   override scream.cfg's mode
+--setup                 open the setup launcher first
 --game sdc|tlv          skip the intro and menu: main game or The Last Visit
 --start ROOM[:NODE]     skip the intro and start at a location, e.g. garden:n1
 --save-dir DIR          keep saves and settings in DIR
@@ -176,7 +190,8 @@ Not yet verified:
 Deliberate differences:
 
 - The screen mode is scaled to your window or display instead of switching the
-  display resolution.
+  display resolution. Panoramas fill a widescreen window unless `WIDESCREEN` is
+  0; everything else stays 4:3.
 - Loading a game starts from a clean start-of-game state before applying the
   file.
 

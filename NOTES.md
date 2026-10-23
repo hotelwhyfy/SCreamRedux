@@ -592,6 +592,10 @@ saves). Ghidra on `scream.exe` covers semantics the scripts don't reveal.
   `settings.cfg`; the original forgets them (they only travel inside saved games).
 - Saved games and `scream.log` live in the user data folder, not the game folder.
 - Two loops in smooth scLookAt that never end in scream.exe are made to finish.
+- The setup launcher (`src/setup.cpp`; `--setup`, Option/Alt held at start, macOS
+  Settings… ⌘,) edits the game's scream.cfg in place (backup `scream.cfg.orig`); it adds the
+  port's own key WIDESCREEN (default 1), which scream.exe's parser skips like any unknown
+  word. The original had no launcher; scream.exe contains an uncalled cfg writer (`0x40f8e0`).
 - Additions: middle-drag look, F11 screenshot, the captured pointer for alternate control on
   macOS (the original's SetCursorPos recentring triggers "shake to locate"), the macOS
   fullscreen menu bar suppressed, and the test tools (`--check`, `--crawl`, `--explore`, …).

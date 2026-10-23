@@ -61,7 +61,16 @@ add_executable(scream
   src/check.cpp
   src/lua50.cpp
   src/crawl.cpp
-  src/explore.cpp)
+  src/explore.cpp
+  src/setup.cpp)
+if(APPLE)
+  enable_language(OBJCXX)
+  target_sources(scream PRIVATE src/platform_mac.mm)
+  target_link_libraries(scream PRIVATE "-framework AppKit" "-framework CoreGraphics")
+  set_source_files_properties(src/platform_mac.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+else()
+  target_sources(scream PRIVATE src/platform.cpp)
+endif()
 target_include_directories(scream PRIVATE src third_party/stb)
 target_link_libraries(scream PRIVATE lua51 theoradec SDL3::SDL3)
 if(NOT MSVC)

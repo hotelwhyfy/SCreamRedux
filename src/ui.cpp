@@ -18,7 +18,6 @@ namespace {
 // 10 icons per row in the DC (70 slots), 8 in the 2006 engine (P 0x408fa0).
 int columns(bool release2006) { return release2006 ? 8 : 10; }
 int slotCount(bool release2006) { return release2006 ? 64 : 70; }
-constexpr float kLabelScale = 0.75f;
 constexpr int kJournalPage = 76;  // lines per two-page spread
 
 const Reaction* findReaction(const std::vector<Reaction>& reactions, const Item* item) {

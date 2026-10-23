@@ -196,6 +196,7 @@ public:
         std::string script = "main", resource = "game.res", path = ".\\", language = "en";
         int width = 1024, height = 768, depth = 32, quality = 3, fullscreen = 1, surround = 1, log = 0,
             vsync = 1, rate = 0, audioDevice = 0, bufferSize = 32768, numBuffers = 4, debug = 0;
+        int widescreen = 1;  // this port's key: panoramas fill a window wider than 4:3
     } config;
     void applyConfig();
     void setLogging(bool on);  // SC_LOG: append the log to scream.log

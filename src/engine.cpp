@@ -10,6 +10,7 @@
 
 #include "constants.hpp"
 #include "gl.hpp"
+#include "platform.hpp"
 
 namespace {
 
@@ -22,15 +23,6 @@ constexpr float kPitchLimit = 1.75f;     // pitch is the look vector's y; |y| <=
 constexpr float kFpsLook = 0.0003f;      // alternate control: radians per pixel off centre, per frame (0x483238)
 constexpr float kFpsPitchDown = -2.0f;   // ... which lets the view go lower (0x48323c)
 constexpr double kTurboStep = 0.5;       // --turbo: game seconds per frame
-
-float faceYaw(int face) {
-    switch (face) {
-    case sc::RIGHT: return 90;
-    case sc::BACK: return 180;
-    case sc::LEFT: return 270;
-    default: return 0;
-    }
-}
 
 float wrap180(float a) {
     a = std::fmod(a + 180.0f, 360.0f);
@@ -146,6 +138,13 @@ bool Engine::init() {
     }
     if (!renderer.init())
         return false;
+    // macOS: Settings… in the application menu opens the setup launcher beside the game.
+    if (!opts.turbo)
+        platform::installSettingsMenu([dirs = opts.dataDirs] {
+            std::vector<std::string> args{"--setup-only"};
+            for (const auto& d : dirs) args.insert(args.end(), {"--data", d.string()});
+            platform::spawnSelf(args);
+        });
     if (release2006)
         renderer.useDome2006();
     SDL_HideCursor();
@@ -285,6 +284,7 @@ bool Engine::loadSettings(const std::string& file) {
         else if (key == "NUM_BUFFERS") number(c.numBuffers);
         else if (key == "DEBUG") number(c.debug);
         else if (key == "LANGUAGE") text(c.language);
+        else if (key == "WIDESCREEN") number(c.widescreen);  // ours; scream.exe skips the words
     }
     applyConfig();
     return true;
@@ -696,22 +696,22 @@ Engine::ZoomRect Engine::zoomRect(const View&) {
     return {0, gMode.bar, float(sc::SCREEN_W), sc::SCREEN_H - 2 * gMode.bar};
 }
 
-// The 3D view: full window width, between the 64 pixel UI bars (glViewport(0, 64, W, H-128)).
 // The view area of the 4:3 canvas only (2D screens over a 3D backdrop: zooms, the menu).
 Viewport Engine::canvasViewport() const {
-    Viewport vp = nodeViewport();
     int w, h;
     SDL_GetWindowSizeInPixels(window_, &w, &h);
     const Canvas c = Canvas::fit(w, h);
+    const int top = int(c.y + gMode.bar * c.scale), bottom = int(c.y + (sc::SCREEN_H - gMode.bar) * c.scale);
     // Rounded as the image's own pixels are (by pixel centre), so the backdrop
     // covers exactly the columns the 2D image does.
     const int left = int(std::lround(c.x)), right = int(std::lround(c.x + sc::SCREEN_W * c.scale));
-    vp.x = left;
-    vp.w = right - left;
-    return vp;
+    return {left, top, right - left, bottom - top};
 }
 
+// The 3D view: full window width, between the 64 pixel UI bars (glViewport(0, 64, W, H-128)).
 Viewport Engine::nodeViewport() const {
+    if (!config.widescreen)
+        return canvasViewport();  // 4:3 like the original's screen, black at the sides
     int w, h;
     SDL_GetWindowSizeInPixels(window_, &w, &h);
     Canvas c = Canvas::fit(w, h);

@@ -77,6 +77,8 @@ src/
   save.cpp              scream.0NN saved games (DC/2006 layouts); new-game baseline snapshot
   effects.cpp           sky/fog/rain/night/candle/lamp/dream/ambience/screen colour
   check.cpp crawl.cpp explore.cpp   test tools (below)
+  setup.cpp             the setup launcher (--setup): edits scream.cfg; test hook SCREAM_SETUP_KEYS
+  platform.hpp, platform_mac.mm, platform.cpp   Option/Alt at start, macOS Settings… menu, relaunch
   constants.hpp         SC_* values (must match scream.sc)
 tools/
   scream_res.py         list/extract .res archives

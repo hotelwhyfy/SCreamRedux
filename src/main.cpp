@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <string>
@@ -16,6 +17,8 @@
 #include "video.hpp"
 #include "engine.hpp"
 #include "lua50.hpp"
+#include "platform.hpp"
+#include "setup.hpp"
 
 namespace {
 
@@ -36,6 +39,7 @@ void usage() {
         "  --save-dir DIR    keep saves and preferences in DIR (for tests)\n"
         "  --fullscreen      run fullscreen (default: scream.cfg FULLSCREEN)\n"
         "  --windowed        run in a window\n"
+        "  --setup           open the setup launcher first (also: hold Option / Alt at start)\n"
         "  --window WxH      window size (default: scream.cfg WIDTH x HEIGHT)\n"
         "  --hotspots        draw clickable areas (SC_SHOW_HOTSPOTS)\n"
         "  --trace           log every sc* call\n"
@@ -147,6 +151,7 @@ int run(const Options& opts, std::string script) {
 int main(int argc, char** argv) {
     Options opts;
     std::string script;  // default: scream.cfg's SCRIPT
+    int setup = 0;       // 1: the setup launcher, then the game; 2: only the launcher
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         auto next = [&]() -> std::string {
@@ -165,6 +170,8 @@ int main(int argc, char** argv) {
         else if (a == "--exec") opts.exec = next();
         else if (a == "--fullscreen") opts.fullscreen = 1;
         else if (a == "--windowed") opts.fullscreen = 0;
+        else if (a == "--setup") setup = 1;
+        else if (a == "--setup-only") setup = 2;
         else if (a == "--window") { std::string v = next(); opts.windowW = std::stoi(v); opts.windowH = std::stoi(v.substr(v.find('x') + 1)); }
         else if (a == "--trace") opts.trace = true;
         else if (a == "--hotspots") opts.hotspots = true;
@@ -179,6 +186,16 @@ int main(int argc, char** argv) {
         else { std::fprintf(stderr, "unknown option %s\n", a.c_str()); usage(); return 2; }
     }
     if (opts.dataDirs.empty()) { usage(); return 2; }
+    const bool automated = opts.turbo || opts.check || opts.verifyMedia || (!opts.screenshot.empty() && setup != 2);
+    if (setup == 0 && !automated && platform::setupKeyHeld())
+        setup = 1;
+    const SetupTest setupTest{std::getenv("SCREAM_SETUP_KEYS") ? std::getenv("SCREAM_SETUP_KEYS") : "",
+                              setup == 2 ? opts.screenshot : std::string()};
+    const bool testing = !setupTest.keys.empty() || !setupTest.screenshot.empty();
+    if (setup && runSetup(opts.dataDirs, setup == 2, testing ? &setupTest : nullptr) == SetupResult::Quit)
+        return 0;
+    if (setup == 2)
+        return 0;
 
     int status = run(opts, script);
     SDL_Quit();  // after the engine has released its window, GL context and audio device

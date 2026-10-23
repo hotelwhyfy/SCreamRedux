@@ -546,6 +546,7 @@ bool Engine::saveSlot(int slot) {
     st.str(set::SPLASH, text(sc::SPLASH, "sc_logo.tga"), 0x50);
     st.str(set::SCRIPT, config.script, 0x50);
     st.i32(set::SLIDESHOW, slideshow_ ? 1 : 0);
+    st.i32(set::GLOWTEXT, 0);  // never set by anything (dead in both exes)
     const std::pair<size_t, int> flagFields[] = {{set::WAIT, sc::WAIT}, {set::SKY, sc::SKY}, {set::NIGHT, sc::NIGHT},
                                                  {set::GLOW, sc::GLOW}, {set::RAIN, sc::RAIN}, {set::FOG, sc::FOG},
                                                  {set::DREAM, sc::DREAM}, {set::CANDLE, sc::CANDLE},
