@@ -354,6 +354,14 @@ Viewport nodeView(App& a, model::Element& node) {
     dl->PopClipRect();
     if (hovered && d.mode == App::Drag::Mode::None) tooltip(a, *hovered->e);
 
+    // Faces the data doesn't have show dark magenta: name them.
+    std::string missing;
+    for (int f = 1; f <= 6; ++f)
+        if (auto* t = node.find("scTexture", kFaces[f - 1]); !t || t->args.size() < 2 || !a.texture(a.p.resolve(t->args[1])))
+            missing += std::string(missing.empty() ? "" : ", ") + (kFaces[f - 1] + 3);
+    if (!missing.empty())
+        dl->AddText({r0.x + 8, r0.y + 8}, IM_COL32(255, 170, 170, 255), ("missing image on " + missing).c_str());
+
     // The panorama itself is drawn by the renderer under this window.
     a.scene.view.isZoom = false;
     for (int f = 1; f <= 6; ++f) {
@@ -378,6 +386,11 @@ void zoomView(App& a, model::Element& zoom) {
     ImVec2 r0 = ImGui::GetCursorScreenPos();
     if (tex) ImGui::GetWindowDrawList()->AddImage(ImTextureID(intptr_t(tex->id)), r0, {r0.x + w, r0.y + h});
     else ImGui::GetWindowDrawList()->AddRectFilled(r0, {r0.x + w, r0.y + h}, IM_COL32(40, 0, 40, 255));
+    if (!tex) {  // say why it's empty
+        std::string why = image.empty() ? "no image: this zoom has no scTexture(SC_ZOOM, ...)"
+                                        : "missing image: " + image + " is in none of the data's archives or folders";
+        ImGui::GetWindowDrawList()->AddText({r0.x + 12, r0.y + 12}, IM_COL32(255, 170, 170, 255), why.c_str());
+    }
     ImGui::InvisibleButton("zoom", {w, h});
     ImDrawList* dl = ImGui::GetWindowDrawList();
     ImGuiIO& io = ImGui::GetIO();
