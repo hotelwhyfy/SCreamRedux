@@ -578,8 +578,8 @@ saves). Ghidra on `scream.exe` covers semantics the scripts don't reveal.
 
 - The window scales the configured mode (WIDTH × HEIGHT) to fit; the original changed the
   display mode in fullscreen and laid out in real pixels in a window. On a window wider than
-  the mode's 4:3, panoramas and zooms' backdrops fill the extra width (the original was
-  always 4:3); the 2D screens, including the menu and its clouds, stay 4:3 with black sides.
+  the mode's 4:3, panoramas fill the extra width (the original was always 4:3); zooms, the
+  menu and the other 2D screens, with the sky behind them, stay 4:3 with black sides.
 - Loading a saved game first restores the start-of-game baseline; scream.exe leaves whatever
   the file doesn't cover (non-numeric globals, choice lists) as it was in memory.
 - Setup choices (alternate control, hints, speeds, gamma, surround) persist in

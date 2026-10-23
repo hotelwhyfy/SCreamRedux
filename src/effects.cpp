@@ -441,7 +441,7 @@ void Engine::drawZoomScene(const View& z, const RendererTexture& image, const Zo
         const RendererTexture* mask = nullptr;
         if (auto dot = z.image.rfind('.'); dot != std::string::npos)
             mask = renderer.optionalTexture(res, z.image.substr(0, dot) + "_msk.tga");
-        Blend maskBlend = drawBackdrop(nodeViewport(), true).value_or(Blend::AddOne);
+        Blend maskBlend = drawBackdrop(canvasViewport(), true).value_or(Blend::AddOne);  // the zoom is 4:3
         if (mask) renderer.drawImagePass(*mask, zr.x, zr.y, zr.w, zr.h, P{1, 1, 1, 1, maskBlend});
         else renderer.drawRectPass(zr.x, zr.y, zr.w, zr.h, P{1, 1, 1, 1, maskBlend});
         renderer.drawImagePass(image, zr.x, zr.y, zr.w, zr.h, P{1, 1, 1, 1, Blend::DstColorZero});

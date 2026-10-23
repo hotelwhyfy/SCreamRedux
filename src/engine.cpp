@@ -697,6 +697,17 @@ Engine::ZoomRect Engine::zoomRect(const View&) {
 }
 
 // The 3D view: full window width, between the 64 pixel UI bars (glViewport(0, 64, W, H-128)).
+// The view area of the 4:3 canvas only (2D screens over a 3D backdrop: zooms, the menu).
+Viewport Engine::canvasViewport() const {
+    Viewport vp = nodeViewport();
+    int w, h;
+    SDL_GetWindowSizeInPixels(window_, &w, &h);
+    const Canvas c = Canvas::fit(w, h);
+    vp.x = int(c.x);
+    vp.w = int(sc::SCREEN_W * c.scale);
+    return vp;
+}
+
 Viewport Engine::nodeViewport() const {
     int w, h;
     SDL_GetWindowSizeInPixels(window_, &w, &h);

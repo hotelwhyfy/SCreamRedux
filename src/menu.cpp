@@ -345,13 +345,7 @@ void Engine::drawMenuBackground() {
     renderer.drawImageUV(*t, x, y, w, h, 0, 0, 1, 1, 1, 1, 1, 1, Blend::AddOne);
     // The clouds go through the 3D view, which in scream.exe is only as wide as
     // its 4:3 mode: keep them to the canvas, not the full width of a wide window.
-    Viewport vp = nodeViewport();
-    int ww, wh;
-    SDL_GetWindowSizeInPixels(window_, &ww, &wh);
-    const Canvas c = Canvas::fit(ww, wh);
-    vp.x = int(c.x);
-    vp.w = int(sc::SCREEN_W * c.scale);
-    drawClouds(vp);
+    drawClouds(canvasViewport());
     renderer.drawImage(*t, x, y, w, h);
 }
 

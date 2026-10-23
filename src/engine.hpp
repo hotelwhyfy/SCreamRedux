@@ -337,6 +337,7 @@ private:
                        const std::function<void(float, float, float, float, Blend)>& wash);
     Object* hovered(int& edge);
     Viewport nodeViewport() const;
+    Viewport canvasViewport() const;
     void panCamera(double dt);
     // Alternate control (SC_FPS_STYLE, 0x4df8e10): the view follows the mouse's
     // offset from the screen centre, the pointer springs back to the centre.
