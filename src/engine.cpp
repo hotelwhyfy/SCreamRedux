@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <ctime>
 #include <fstream>
 #include <optional>
 #include <sstream>
@@ -20,9 +21,6 @@ constexpr float kRampPerSecond = 1.5f;   // acceleration ramp: +0.025 per frame 
 constexpr float kPitchLimit = 1.75f;     // pitch is the look vector's y; |y| <= 1.75 (~60.3 deg)
 constexpr float kFpsLook = 0.0003f;      // alternate control: radians per pixel off centre, per frame (0x483238)
 constexpr float kFpsPitchDown = -2.0f;   // ... which lets the view go lower (0x48323c)
-constexpr float kPx = float(sc::SCREEN_W) / Engine::kOrigW;  // canvas units per original pixel (1024x768 mode)
-constexpr float kBar = 64 * kPx;         // UI bars above and below the 3D view: 64 pixels
-constexpr double kLookDuration = 0.6;    // seconds for scLookAt(..., SC_SMOOTH)
 constexpr double kTurboStep = 0.5;       // --turbo: game seconds per frame
 
 float faceYaw(int face) {
@@ -49,9 +47,12 @@ Engine::Engine(Options o) : opts(std::move(o)) {
     settings[sc::TXT_SPEED] = 50.0;
     settings[sc::MOV_SPEED] = 25.0;
     settings[sc::CAM_SPEED] = 50.0;
-    settings[sc::RES_FILE] = std::string("scratches.res");
+    settings[sc::RES_FILE] = config.resource;  // "game.res" until the script or cfg names one
+    settings[sc::RES_PATH] = config.path;
     settings[sc::SHOW_HOTSPOTS] = opts.hotspots ? 1.0 : 0.0;
     flags.insert(sc::WAIT);  // enabled by default in scream.exe (0x40f260)
+    applyConfig();
+    loadSettings("scream.cfg");  // at startup, before the scripts (0x4061d0)
 }
 
 Engine::~Engine() {
@@ -112,27 +113,43 @@ bool Engine::init() {
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG);
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
 
+    // The mode comes from scream.cfg (or scSet / scEnable(SC_FULLSCREEN) before
+    // scInit) unless the command line says otherwise. Fullscreen uses the
+    // desktop mode and scales the configured one onto it; test runs are windowed.
+    auto setting = [&](int key, double def) {
+        auto* v = std::get_if<double>(&settings[key]);
+        return v ? *v : def;
+    };
+    bool fullscreen = opts.fullscreen >= 0 ? opts.fullscreen != 0 : setting(sc::FULLSCREEN, 1) != 0;
+    if (opts.turbo || !opts.screenshot.empty())
+        fullscreen = false;
+    int winW = opts.windowW > 0 ? opts.windowW : int(setting(sc::WIDTH, 1024));
+    int winH = opts.windowH > 0 ? opts.windowH : int(setting(sc::HEIGHT, 768));
+    gMode.set(int(setting(sc::HEIGHT, 768)));
     SDL_WindowFlags flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
-    if (!opts.windowed)
+    if (fullscreen)
         flags |= SDL_WINDOW_FULLSCREEN;
-    window_ = SDL_CreateWindow("SCream Redux", opts.windowW, opts.windowH, flags);
-    mouseX_ = opts.windowW / 2.0f;  // the pointer starts centred (alternate control looks at its offset)
-    mouseY_ = opts.windowH / 2.0f;
+    window_ = SDL_CreateWindow("SCream Redux", winW, winH, flags);
+    mouseX_ = winW / 2.0f;  // the pointer starts centred (alternate control looks at its offset)
+    mouseY_ = winH / 2.0f;
     if (!window_ || !(gl_ = SDL_GL_CreateContext(window_))) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "window/GL: %s", SDL_GetError());
         return false;
     }
-    SDL_GL_SetSwapInterval(opts.turbo ? 0 : 1);
+    // VSYNC: nonzero asks for a swap interval of 1 (0x419917); 0 leaves the driver's default.
+    if (opts.turbo) SDL_GL_SetSwapInterval(0);
+    else if (config.vsync) SDL_GL_SetSwapInterval(1);
     if (const char* missing = gl::load()) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "missing GL entry point %s", missing);
         return false;
     }
     if (!renderer.init())
         return false;
+    if (release2006)
+        renderer.useDome2006();
     SDL_HideCursor();
     sound.init();
     sound.setSilent(opts.turbo);
-    loadSettings("scream.cfg");  // like scream.exe at startup; the window keeps the command-line mode
     mountResources();
     return true;
 }
@@ -154,8 +171,6 @@ bool Engine::switchRoom(const std::string& name) {
     // Other kinds keep their binding (one slot per kind).
     world.bound.room = r;
     world.bound.node = world.bound.view = node;
-    // Timers created with scTimerCreate belong to the location they were made in.
-    std::erase_if(timers_, [](const Timer& t) { return !t.global; });
     if (!r->onEnter.empty())
         script.start(r->onEnter);
     return true;
@@ -177,7 +192,6 @@ bool Engine::switchNode(const std::string& name) {
     world.bound.node = world.bound.view = n;
     zooms.clear();
     overlay = nullptr;
-    std::erase_if(timers_, [](const Timer& t) { return !t.global; });
     return true;
 }
 
@@ -215,6 +229,12 @@ bool Engine::switchOverlay(const std::string& name) {
     return true;
 }
 
+// scream.cfg (0x40f4a0, also scLoadSettings): the file is read as a stream of
+// words (fscanf "%s"), so there is no line, comment or section syntax: a word
+// that equals a key (case-sensitive) takes the next word as its value; others,
+// like "[SCREAM]" or the comment text, are skipped. A number that doesn't parse
+// leaves its word to be read as a key and gets the previous number read; a word
+// like "1.5" yields 1 and leaves ".5". Nothing is range-checked.
 bool Engine::loadSettings(const std::string& file) {
     auto path = findData(file);
     std::ifstream in(path);
@@ -222,31 +242,104 @@ bool Engine::loadSettings(const std::string& file) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "settings file %s not found", file.c_str());
         return false;
     }
-    static const std::map<std::string, int> keys = {
-        {"WIDTH", sc::WIDTH}, {"HEIGHT", sc::HEIGHT}, {"DEPTH", sc::DEPTH}, {"QUALITY", sc::QUALITY},
-        {"FULLSCREEN", sc::FULLSCREEN}, {"SURROUND", sc::SURROUND}, {"DEBUG", sc::DEBUG},
-        {"LANGUAGE", sc::LANGUAGE}, {"RESOURCE", sc::RESOURCE}, {"LOG", sc::LOG}};
-    std::string line;
-    while (std::getline(in, line)) {
-        line = line.substr(0, line.find(';'));
-        std::istringstream words(line);
-        std::string key, value;
-        if (!(words >> key >> value))
-            continue;
-        auto it = keys.find(key);
-        if (it == keys.end())
-            continue;  // SCRIPT, PATH, VSYNC, RATE, AUDIO_DEVICE, BUFFER_SIZE, NUM_BUFFERS
-        char* end = nullptr;
-        double num = std::strtod(value.c_str(), &end);
-        if (end && *end == 0) settings[it->second] = num;
-        else settings[it->second] = value;
+    std::deque<std::string> words;
+    for (std::string w; in >> w;)
+        words.push_back(w);
+    Config& c = config;
+    int lastNumber = 0;
+    auto text = [&](std::string& v) {
+        if (!words.empty()) v = words.front(), words.pop_front();
+    };
+    auto number = [&](int& v) {
+        if (!words.empty()) {
+            const std::string& w = words.front();
+            size_t i = (w[0] == '-' || w[0] == '+') ? 1 : 0, digits = i;
+            while (digits < w.size() && std::isdigit(static_cast<unsigned char>(w[digits]))) ++digits;
+            if (digits > i) {
+                lastNumber = std::stoi(w.substr(0, digits));
+                std::string rest = w.substr(digits);
+                words.pop_front();
+                if (!rest.empty()) words.push_front(rest);
+            }
+        }
+        v = lastNumber;
+    };
+    while (!words.empty()) {
+        std::string key = words.front();
+        words.pop_front();
+        if (key == "SCRIPT") text(c.script);
+        else if (key == "RESOURCE") text(c.resource), settings[sc::RES_FILE] = c.resource;
+        else if (key == "PATH") text(c.path), c.path += "\\", settings[sc::RES_PATH] = c.path;
+        else if (key == "WIDTH") number(c.width);
+        else if (key == "HEIGHT") number(c.height);
+        else if (key == "DEPTH") number(c.depth);
+        else if (key == "QUALITY") number(c.quality);
+        else if (key == "FULLSCREEN") number(c.fullscreen);
+        else if (key == "SURROUND") number(c.surround);
+        else if (key == "LOG") number(c.log);
+        else if (key == "VSYNC") number(c.vsync);
+        else if (key == "RATE") number(c.rate);
+        else if (key == "AUDIO_DEVICE") number(c.audioDevice);
+        else if (key == "BUFFER_SIZE") number(c.bufferSize);
+        else if (key == "NUM_BUFFERS") number(c.numBuffers);
+        else if (key == "DEBUG") number(c.debug);
+        else if (key == "LANGUAGE") text(c.language);
     }
+    applyConfig();
     return true;
+}
+
+// The cfg values live in the same variables as scSet/scGet/scEnable.
+namespace {
+std::ofstream gLogFile;
+SDL_LogOutputFunction gDefaultLog = nullptr;
+void* gDefaultLogData = nullptr;
+
+void logOutput(void* data, int category, SDL_LogPriority priority, const char* message) {
+    if (gDefaultLog)
+        gDefaultLog(data, category, priority, message);
+    if (gLogFile.is_open()) {
+        char stamp[32];
+        std::time_t t = std::time(nullptr);
+        std::strftime(stamp, sizeof stamp, "%Y-%m-%d %H:%M:%S", std::localtime(&t));
+        gLogFile << '[' << stamp << "] " << message << std::endl;
+    }
+}
+}  // namespace
+
+// SC_LOG (scream.cfg LOG, scEnable(SC_LOG), the L key): the original appends
+// its log to scream.log in the game folder (0x404a30); ours goes to the save folder.
+void Engine::setLogging(bool on) {
+    if (!gDefaultLog) {
+        SDL_GetLogOutputFunction(&gDefaultLog, &gDefaultLogData);
+        SDL_SetLogOutputFunction(logOutput, gDefaultLogData);
+    }
+    if (on && !gLogFile.is_open())
+        gLogFile.open(saveDir() / "scream.log", std::ios::app);
+    else if (!on && gLogFile.is_open())
+        gLogFile.close();
+    settings[sc::LOG] = on ? 1.0 : 0.0;
+}
+
+void Engine::applyConfig() {
+    const Config& c = config;
+    settings[sc::WIDTH] = double(c.width);
+    settings[sc::HEIGHT] = double(c.height);
+    settings[sc::DEPTH] = double(c.depth);
+    settings[sc::QUALITY] = double(c.quality);
+    settings[sc::FULLSCREEN] = double(c.fullscreen);
+    settings[sc::SURROUND] = double(c.surround);
+    settings[sc::LOG] = double(c.log);
+    settings[sc::DEBUG] = double(c.debug);
+    settings[sc::LANGUAGE] = c.language;
+    gMode.set(c.height);
+    renderer.setNearest(c.quality == 0);
+    setLogging(c.log != 0);
 }
 
 void Engine::abortGame() {
     // scream.exe stops the playlist, waits for a key or click, then returns to the main menu.
-    sound.playlistStop(-1);
+    sound.playlistStop(-1, true);
     aborted_ = true;
 }
 
@@ -288,17 +381,92 @@ void Engine::zoomBack() {
     zooms.clear();
 }
 
+// scLookAt (0x412670). Instant: the angles of a table (0x41263c); up looks
+// at y 6.28 and down at y -1.57, both facing the front. Smooth: a frame by
+// frame turn (stepLook) to a second table (0x412654), where back is 0 or 6.28,
+// whichever is nearer, and down looks level at the front (as compiled).
 void Engine::lookAt(int face, bool smooth) {
-    float yaw = face == sc::UP || face == sc::DOWN ? cam.yaw : faceYaw(face);
-    const float limit = std::atan(kPitchLimit) * 180.0f / 3.14159265f;
-    float pitch = face == sc::UP ? limit : face == sc::DOWN ? -limit : 0.0f;
+    camAnim_.active = false;
     if (!smooth) {
-        cam.yaw = yaw;
-        cam.pitch = pitch;
-        camAnim_.active = false;
+        switch (face) {
+        case sc::FRONT: setLook(3.14f, 0); break;
+        case sc::BACK: setLook(0, 0); break;
+        case sc::LEFT: setLook(1.57f, 0); break;
+        case sc::RIGHT: setLook(4.71f, 0); break;
+        case sc::UP: setLook(3.14f, 6.28f); break;
+        case sc::DOWN: setLook(3.14f, -1.57f); break;
+        }
         return;
     }
-    camAnim_ = {true, cam.yaw, cam.yaw + wrap180(yaw - cam.yaw), cam.pitch, pitch, now(), kLookDuration};
+    if (face < sc::FRONT || face > sc::DOWN)
+        return;
+    if (flag(sc::WAIT))  // 0x412590: the wait cursor while it turns
+        waitMode = true;
+    CamAnim& a = camAnim_;
+    getLook(a.yaw, a.y);
+    a.yaw = (a.yaw * 0.15923566f - std::floor(a.yaw * 0.15923566f)) * 2.0f * 3.14f;  // into [0, 6.28)
+    a.toY = 0;
+    switch (face) {
+    case sc::BACK: a.toYaw = a.yaw > 3.14f ? 6.28f : 0; break;
+    case sc::LEFT: a.toYaw = 1.57f; break;
+    case sc::RIGHT: a.toYaw = 4.71f; break;
+    case sc::UP: a.toYaw = 3.14f, a.toY = 6.28f; break;
+    default: a.toYaw = 3.14f; break;  // front, and down
+    }
+    a.yawDone = a.yDone = false;
+    a.active = true;
+    locked = true;  // 0x48bc0c for the whole turn, cleared at the end (so also any scLock)
+}
+
+// One frame of the smooth turn: each angle moves by (1 + distance) / 100 per
+// frame (x 60/fps) until it reaches its target; the yaw is done once a step
+// covers the distance. Two cases where scream.exe's loop would never end are
+// made to end: a distance below -1 (its step turns negative and runs away),
+// handled as moving by (1 + |distance|) toward the target, and a pitch that is
+// already exactly on target, which the original never marks done.
+void Engine::stepLook(double dt) {
+    CamAnim& a = camAnim_;
+    const float k = 60.0f * float(dt) * 0.01f;
+    if (release2006) {
+        // The 2006 engine turns both angles at a constant 0.015 per frame (P 0x4103d0).
+        const float step = 0.015f * 60.0f * float(dt);
+        auto move = [&](float& v, float to, bool& done) {
+            if (done) return;
+            if (std::abs(to - v) <= step) v = to, done = true;
+            else v += to > v ? step : -step;
+        };
+        move(a.yaw, a.toYaw, a.yawDone);
+        move(a.y, a.toY, a.yDone);
+    }
+    if (!release2006 && !a.yawDone) {
+        const float d = a.toYaw - a.yaw;
+        const float reach = d < 0 ? 1 - d : d;
+        const float step = (1 + (d < -1 ? -d : d)) * k;
+        a.yaw += d <= 0 ? -step : step;
+        if (step >= reach) a.yawDone = true;
+    }
+    if (!release2006 && !a.yDone) {
+        const float d = a.toY - a.y;
+        const float step = (1 + std::abs(d)) * k;
+        if (a.y < a.toY) {
+            a.y += d < -1 ? step : (1 + d) * k;
+            if (a.y >= a.toY) a.yDone = true;
+        } else if (a.y > a.toY) {
+            a.y -= d < -1 ? step : (1 + d) * k;
+            if (!(a.y > a.toY)) a.yDone = true;
+        } else {
+            a.yDone = true;
+        }
+    }
+    const float fovBase = release2006 ? 53.0f : 45.0f;
+    if (flag(sc::DREAM))  // the field of view eases back to its base (0x4128e8)
+        fx_.fov += fx_.fov > fovBase ? -0.5f : fx_.fov < fovBase ? 0.5f : 0.0f;
+    setLook(a.yaw, a.y);
+    if (a.yawDone && a.yDone) {
+        a.active = false;
+        locked = false;
+        if (flag(sc::WAIT)) waitMode = false;  // 0x4125b0
+    }
 }
 
 // The text setter (0x40e150), shared by scFeedback, dialogue and subtitles.
@@ -308,7 +476,7 @@ void Engine::lookAt(int face, bool smooth) {
 void Engine::feedback(const std::string& text, const std::string& voice) {
     if (!voice.empty())
         sound.playVoice(voice);
-    if (text.size() >= 400)
+    if (text.size() >= (release2006 ? 256u : 400u))
         return;  // the original ignores text that doesn't fit its buffer
     if (text.empty()) {
         feedback_.count = 0;  // the original shows an empty line for 4 s
@@ -317,7 +485,12 @@ void Engine::feedback(const std::string& text, const std::string& voice) {
     SDL_Log("[feedback] %s%s%s", text.c_str(), voice.empty() ? "" : "  ", voice.c_str());
 
     int n = int(text.size()), last, share;
-    if (n > 300) last = 3, share = n / 4;
+    if (release2006) {  // lines of about 70 characters on its 800 pixel screen (P 0x40c500)
+        if (n >= 211) last = 3, share = n / 4;
+        else if (n >= 140) last = 2, share = n / 3;
+        else if (n >= 70) last = 1, share = n / 2;
+        else last = 0, share = 70;
+    } else if (n > 300) last = 3, share = n / 4;
     else if (n > 200) last = 2, share = n / 3;
     else if (n > 100) last = 1, share = n / 2;
     else last = 0, share = 100;
@@ -466,14 +639,60 @@ void Engine::perform(const Action& a) {
     }
 }
 
-void Engine::addTimer(double seconds, const std::string& fn, bool global) {
-    timers_.push_back({now() + seconds, fn, global});
+// scTimerCreate(id, seconds, fn) (0x412220) puts a timer in the bound room,
+// scTimerCreateGlobal (0x412330) in the world. An id already in use re-arms
+// that timer, except the newest one, which the search misses (slots are
+// 1-based and it scans 0..count-1): re-using its id adds a second timer.
+// Slot 0 is an unused entry with id 0, so a timer with id 0 never runs.
+void Engine::addTimer(int id, int seconds, const std::string& fn, bool global) {
+    Room* r = world.bound.room;
+    if (!global && !r) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "scTimerCreate: no room bound");
+        return;
+    }
+    std::vector<GameTimer>& list = global ? globalTimers_ : r->timers;
+    if (id == 0)
+        return;
+    for (size_t i = 0; i + 1 < list.size(); ++i)
+        if (list[i].id == id) {
+            list[i] = {id, seconds, 0, true, fn};
+            return;
+        }
+    if (list.size() >= 31) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Too many timers! (fatal in scream.exe)");
+        return;
+    }
+    list.push_back({id, seconds, 0, true, fn});
+}
+
+// Once a second (0x412010): global timers count only in the node view
+// (state 4000), the current room's timers in any state. A timer of N seconds
+// fires on its Nth tick, then stays inactive until created again.
+void Engine::updateTimers() {
+    if (now() - timerTick_ < 1.0)
+        return;
+    timerTick_ = now();
+    auto tick = [&](std::vector<GameTimer>& list) {
+        for (size_t i = 0; i < list.size(); ++i) {
+            GameTimer& t = list[i];
+            if (!t.active || ++t.elapsed < t.seconds)
+                continue;
+            t.elapsed = 0;
+            t.active = false;
+            script.start(t.fn);
+        }
+    };
+    const bool nodeState = view() && !view()->isZoom && !invOpen_ && !journalOpen_ && !overlay && !choice_ && !video_;
+    if (nodeState)
+        tick(globalTimers_);
+    if (room)
+        tick(room->timers);
 }
 
 // Zoom images are stretched over the whole view between the bars, whatever
 // their size (800x472 originals, 1024x640 in the DC update).
 Engine::ZoomRect Engine::zoomRect(const View&) {
-    return {0, kBar, float(sc::SCREEN_W), sc::SCREEN_H - 2 * kBar};
+    return {0, gMode.bar, float(sc::SCREEN_W), sc::SCREEN_H - 2 * gMode.bar};
 }
 
 // The 3D view: full window width, between the 64 pixel UI bars (glViewport(0, 64, W, H-128)).
@@ -481,7 +700,7 @@ Viewport Engine::nodeViewport() const {
     int w, h;
     SDL_GetWindowSizeInPixels(window_, &w, &h);
     Canvas c = Canvas::fit(w, h);
-    int top = int(c.y + kBar * c.scale), bottom = int(c.y + (sc::SCREEN_H - kBar) * c.scale);
+    int top = int(c.y + gMode.bar * c.scale), bottom = int(c.y + (sc::SCREEN_H - gMode.bar) * c.scale);
     return {0, top, w, bottom - top};
 }
 
@@ -511,20 +730,33 @@ Object* Engine::hovered(int& edge) {
     // (H - 192), measured from the top bar and from H - 128, in the original's
     // screen pixels (so the bottom zone is the deeper one, as in scream.exe).
     Canvas c = Canvas::fit(w, h);
-    const float zoneY = std::floor((kOrigH - 192) * kEdgeZone) * kPx;
+    const float zoneY = std::floor((gMode.h - 192) * kEdgeZone) * gMode.px;
     const float cy = c.toCanvasY(my);
+    bool left, right, up, down;
     if (fpsStyle()) {
         // Alternate control: the zones close in to a pixel either side of the
         // centre, so the arrow shows the way the view is turning.
-        const float dx = (mx - w / 2.0f) / c.scale / kPx, dy = (my - h / 2.0f) / c.scale / kPx;
-        if (dx < -1) edge = sc::LEFT;
-        else if (dx > 1) edge = sc::RIGHT;
-        else if (dy < -1) edge = sc::UP;
-        else if (dy > 1) edge = sc::DOWN;
-    } else if (mx < w * kEdgeZone) edge = sc::LEFT;
-    else if (mx > w * (1 - kEdgeZone)) edge = sc::RIGHT;
-    else if (cy < kBar + zoneY) edge = sc::UP;
-    else if (cy > sc::SCREEN_H - 2 * kBar - zoneY) edge = sc::DOWN;
+        const float dx = (mx - w / 2.0f) / c.scale / gMode.px, dy = (my - h / 2.0f) / c.scale / gMode.px;
+        left = dx < -1, right = dx > 1, up = dy < -1, down = dy > 1;
+    } else {
+        left = mx < w * kEdgeZone, right = mx > w * (1 - kEdgeZone);
+        up = cy < gMode.bar + zoneY, down = cy > sc::SCREEN_H - 2 * gMode.bar - zoneY;
+    }
+    if (slideshow_) {
+        // Slideshow mode's zone test (0x407d50): a vertical zone wins in a
+        // corner and only counts while the view can still turn that way. A
+        // zone takes the click (0x4173be), so no hotspot shows there (0x414448).
+        float yaw, y;
+        getLook(yaw, y);
+        edge = left ? sc::LEFT : right ? sc::RIGHT : 0;
+        if (up && y <= 1.25f) edge = sc::UP;
+        else if (down && y >= -1.25f) edge = sc::DOWN;
+        if (edge)
+            return nullptr;
+    } else if (left) edge = sc::LEFT;
+    else if (right) edge = sc::RIGHT;
+    else if (up) edge = sc::UP;
+    else if (down) edge = sc::DOWN;
 
     Viewport vp = nodeViewport();
     if (my < vp.y || my >= vp.y + vp.h)
@@ -592,8 +824,8 @@ void Engine::beginTransition(float progress, bool unlock) {
     transition_.u1 = 1;
     transition_.x0 = -c.x / c.scale;
     transition_.x1 = (w - c.x) / c.scale;
-    transition_.v0 = 1 - (c.y + kBar * c.scale) / float(h);  // the capture is bottom row first
-    transition_.v1 = 1 - (c.y + (sc::SCREEN_H - kBar) * c.scale) / float(h);
+    transition_.v0 = 1 - (c.y + gMode.bar * c.scale) / float(h);  // the capture is bottom row first
+    transition_.v1 = 1 - (c.y + (sc::SCREEN_H - gMode.bar) * c.scale) / float(h);
     transition_.progress = progress;
     transition_.active = true;
 }
@@ -603,7 +835,7 @@ void Engine::drawTransition() {
     Transition& t = transition_;
     if (!t.active || capturing_)
         return;
-    renderer.drawImageUV(t.capture, t.x0, kBar, t.x1 - t.x0, sc::SCREEN_H - 2 * kBar, t.u0, t.v0, t.u1, t.v1,
+    renderer.drawImageUV(t.capture, t.x0, gMode.bar, t.x1 - t.x0, sc::SCREEN_H - 2 * gMode.bar, t.u0, t.v0, t.u1, t.v1,
                          1 - t.progress);
     double speed = 25;
     if (auto* v = std::get_if<double>(&settings[sc::MOV_SPEED])) speed = *v;
@@ -648,9 +880,9 @@ void Engine::ensureFont() {
 // 8 pixels above the text. Returns the hit row's number (0 = none).
 int Engine::choiceHit(float y) const {
     const int n = int(choice_->options.size());
-    const float py = y * float(kOrigH) / sc::SCREEN_H;
+    const float py = y * float(gMode.h) / sc::SCREEN_H;
     for (int k = 0; k <= n; ++k) {
-        int lo = kOrigH - 16 * (n - k) - 32, hi = lo + 16;
+        int lo = gMode.h - 16 * (n - k) - 32, hi = lo + 16;
         if (py >= float(lo) && py <= float(hi))
             return n == 3 ? k : k + 1;
     }
@@ -666,13 +898,13 @@ int Engine::choiceAt(float, float y) {
 
 void Engine::drawChoice() {
     const int n = int(choice_->options.size()), rows = n + 1, offset = rows == 4 ? -8 : 8;
-    const float px = kPx;
+    const float px = gMode.px;
     float mx, my;
     canvasMouse(mx, my);
     int v = choiceHit(my), hover = v ? n - v + 1 : -1;
     for (int j = 1; j < rows; ++j) {  // row 0 is the empty one
         const std::string& text = choice_->options[size_t(n - j)].first;
-        float y = float(kOrigH - offset - 16 * j) * px;
+        float y = float(gMode.h - offset - 16 * j) * px;
         font_.drawMono(renderer, text, 16 * px, y, px, 1, {0.1f, 0.75f, 0.75f});
         if (j == hover)
             font_.drawMono(renderer, text, 16 * px, y, px, 1, {0.1f, 1, 1});
@@ -707,7 +939,7 @@ void Engine::drawFeedback() {
         break;
     default: offset = 24;
     }
-    const float px = kPx;
+    const float px = gMode.px;
     for (int i = first; i < end; ++i) {
         if (t <= f.duration) {
             if (f.fade > 0) f.fade -= fadeIn * frames;
@@ -715,8 +947,8 @@ void Engine::drawFeedback() {
             f.fade += fadeOut * frames;
         }
         const std::string& line = f.lines[size_t(i)];
-        int x = kOrigW / 2 - int(line.size() / 2) * Font::kMonoAdvance + 1;
-        int y = kOrigH - offset - 16 * i;
+        int x = gMode.w / 2 - int(line.size() / 2) * Font::kMonoAdvance + 1;
+        int y = gMode.h - offset - 16 * i;
         font_.drawMono(renderer, line, float(x) * px, float(y) * px, px, std::clamp(1 - f.fade, 0.0f, 1.0f));
     }
     if (f.fade >= 1)
@@ -763,7 +995,20 @@ void Engine::click() {
         }
         return;
     }
-    if (locked || scriptBusy())
+    if (locked)
+        return;
+    if (slideshow_ && view() && !view()->isZoom) {
+        // A click in an edge zone turns the view one step (0x4173be), even
+        // under scStill or scWait or with an item held.
+        int zone;
+        hovered(zone);
+        if (zone) {
+            beginTransition(0.75f, false);
+            slideshowStep();
+            return;
+        }
+    }
+    if (scriptBusy())
         return;
     int edge;
     Object* o = hovered(edge);
@@ -789,8 +1034,9 @@ void Engine::hotkey(int vk) {
     auto look = [&](float turn, std::optional<float> y) {  // 0x407d30 / 0x407d10, after a short fade
         beginTransition(0.75f);
         camAnim_.active = false;
-        cam.yaw = wrap180(cam.yaw + turn * 180.0f / 3.14159265f);
-        if (y) cam.pitch = std::atan(*y) * 180.0f / 3.14159265f;
+        float yaw, cur;
+        getLook(yaw, cur);
+        setLook(yaw + turn, y ? *y : cur);
     };
     auto cycleSpeed = [&](int key, const char* name) {  // 50 -> 75 -> 25 -> 50
         double v = 50;
@@ -800,6 +1046,8 @@ void Engine::hotkey(int vk) {
         else if (v == 75) v = 25, level = "SLOW";
         else v = 50, level = "NORMAL";
         settings[key] = v;
+        if (release2006 && key == sc::TXT_SPEED && v == 75)
+            name = "test speed";  // as the 2006 executables spell it
         feedback(std::string(name) + " " + level);
         saveUserSettings();
     };
@@ -809,7 +1057,7 @@ void Engine::hotkey(int vk) {
     case 0x27: case 'W': case 0x77: look(0, 1.25f); break;
     case 0x28: case 'S': case 0x73: look(0, -1.25f); break;
     case 0x20: case 'E': case 0x65: look(0, 0.0f); break;
-    case 'L': case 0x6c: opts.trace = !opts.trace; break;  // the original toggles its log file
+    case 'L': case 0x6c: setLogging(!gLogFile.is_open()); break;  // 0x4177b8
     case 0x70: {  // F1
         bool on = !hintsOn();
         settings[sc::HINTS] = on ? 1.0 : 0.0;
@@ -817,21 +1065,27 @@ void Engine::hotkey(int vk) {
         saveUserSettings();
         break;
     }
-    case 0x71: {  // F2 (only the setting: this port plays the front channels only)
+    case 0x71: {  // F2: the -RL/-RR music files play along from the next track on
         bool on = !(std::holds_alternative<double>(settings[sc::SURROUND]) && std::get<double>(settings[sc::SURROUND]) != 0);
         settings[sc::SURROUND] = on ? 1.0 : 0.0;
         feedback(on ? "surround music ON" : "surround music OFF");
         saveUserSettings();
         break;
     }
-    case 0x74:  // F5: quicksave
-        if (!menuOpen() && gameRunning_ && saveSlot(kQuickSlot))
+    case 0x74:  // F5: quicksave, anywhere but the menu (0x417aa5)
+        if (!menuOpen()) {
+            saveSlot(kQuickSlot);
             feedback("Game saved");
+        }
         break;
-    case 0x76:  // F7: quickload
-        if (!slotDescription(kQuickSlot).empty() && loadSlot(kQuickSlot)) {
+    case 0x76:  // F7 (0x41765f): drop the held item, fade everything out over the
+                // "black" zoom for a second, then load the quicksave (updateQuickLoad)
+        if (slotUsed(kQuickSlot) && quickLoadAt_ < 0) {
             closeMenu();
-            feedback("Game loaded");
+            held = nullptr;
+            sound.fadeAll(1);
+            switchZoom("black");
+            quickLoadAt_ = realTime() + 1;
         }
         break;
     case 0x78: cycleSpeed(sc::CAM_SPEED, "camera speed"); break;  // F9
@@ -845,6 +1099,10 @@ void Engine::hotkey(int vk) {
         break;
     }
     case 0x1b:  // Esc (the menu handles its own)
+        if (sleeping_ > 0 && !release2006) {  // the DC's scSleep takes it (0x4124a0)
+            sleepSkip_ = true;
+            break;
+        }
         if (menuOpen() || choice_)
             break;
         if (invOpen_) {
@@ -876,8 +1134,8 @@ void Engine::drawGamma() {
         return;
     Canvas c = Canvas::fit(w, h);
     float u0 = c.x / float(w), u1 = (c.x + sc::SCREEN_W * c.scale) / float(w);
-    float v0 = 1 - (c.y + kBar * c.scale) / float(h), v1 = 1 - (c.y + (sc::SCREEN_H - kBar) * c.scale) / float(h);
-    renderer.drawImageUV(gammaCapture_, 0, kBar, sc::SCREEN_W, sc::SCREEN_H - 2 * kBar, u0, v0, u1, v1, level[gamma_], 1, 1,
+    float v0 = 1 - (c.y + gMode.bar * c.scale) / float(h), v1 = 1 - (c.y + (sc::SCREEN_H - gMode.bar) * c.scale) / float(h);
+    renderer.drawImageUV(gammaCapture_, 0, gMode.bar, sc::SCREEN_W, sc::SCREEN_H - 2 * gMode.bar, u0, v0, u1, v1, level[gamma_], 1, 1,
                          1, Blend::AddAlpha);
 }
 
@@ -946,7 +1204,7 @@ void Engine::handleEvent(const SDL_Event& e) {
         // Middle-drag look is an addition of this port; it obeys the same gates as edge panning.
         if (dragging_ && motion && !locked && !camAnim_.active && !(view() && view()->isZoom)) {
             cam.yaw = wrap180(cam.yaw - e.motion.xrel * 0.25f);
-            const float limit = std::atan(kPitchLimit) * 180.0f / 3.14159265f;
+            const float limit = std::atan(release2006 ? 1.0f : kPitchLimit) * 180.0f / 3.14159265f;
             cam.pitch = std::clamp(cam.pitch + e.motion.yrel * 0.25f, -limit, limit);
         }
         break;
@@ -976,22 +1234,68 @@ void Engine::panCamera(double dt) {
     double camSpeed = 50;
     if (auto* v = std::get_if<double>(&settings[sc::CAM_SPEED])) camSpeed = *v;
     // Zone depth is in the original's screen pixels (1024x768 mode).
-    const float rate = kPanFactor * float(camSpeed) * 0.001f * panRamp_ * 60.0f * float(dt) / kPx;
-    const float zoneY = std::floor((kOrigH - 192) * kEdgeZone) * kPx;
+    const float rate = kPanFactor * float(camSpeed) * 0.001f * panRamp_ * 60.0f * float(dt) / gMode.px;
+    const float zoneY = std::floor((gMode.h - 192) * kEdgeZone) * gMode.px;
 
-    float yaw = cam.yaw * 3.14159265f / 180.0f;
-    float pitchY = std::tan(cam.pitch * 3.14159265f / 180.0f);
+    float yaw, pitchY;  // pitchY: the DC's look y, or the 2006 pitch angle
+    getLook(yaw, pitchY);
+    const float kPitchLimit = pitchLimit();
     bool moved = false;
     // Depth is measured in canvas units so speed doesn't depend on window size.
     if (edge == sc::LEFT) { yaw -= (w * kEdgeZone - mx) / c.scale * rate; moved = true; }
     if (edge == sc::RIGHT) { yaw += (mx - w * (1 - kEdgeZone)) / c.scale * rate; moved = true; }
-    if (edge == sc::UP && pitchY <= kPitchLimit) { pitchY += (kBar + zoneY - cy) * rate; moved = true; }
-    if (edge == sc::DOWN && pitchY >= -kPitchLimit) { pitchY -= (cy - (sc::SCREEN_H - 2 * kBar - zoneY)) * rate; moved = true; }
+    if (edge == sc::UP && pitchY <= kPitchLimit) { pitchY += (gMode.bar + zoneY - cy) * rate; moved = true; }
+    if (edge == sc::DOWN && pitchY >= -kPitchLimit) { pitchY -= (cy - (sc::SCREEN_H - 2 * gMode.bar - zoneY)) * rate; moved = true; }
 
     panRamp_ = moved ? std::min(1.0f, panRamp_ + kRampPerSecond * float(dt)) : 0.0f;
-    cam.yaw = wrap180(yaw * 180.0f / 3.14159265f);
-    cam.pitch = std::atan(std::clamp(pitchY, -kPitchLimit, kPitchLimit)) * 180.0f / 3.14159265f;
+    setLook(yaw, std::clamp(pitchY, -kPitchLimit, kPitchLimit));
 }
+
+// One application of the camera function (0x407e20) for a slideshow click.
+// With alternate control on as well it is one frame of that turn; otherwise
+// a quarter turn sideways, and up or down straight to a look y of 2.0, level
+// only when coming from exactly 1.75 (which in practice never happens).
+void Engine::slideshowStep() {
+    camAnim_.active = false;
+    if (fpsStyle()) {
+        fpsCamera(1.0 / 60, false);
+        return;
+    }
+    int w, h;
+    SDL_GetWindowSizeInPixels(window_, &w, &h);
+    Canvas c = Canvas::fit(w, h);
+    float density = SDL_GetWindowPixelDensity(window_);
+    const float mx = mouseX_ * density, cy = c.toCanvasY(mouseY_ * density);
+    const float zoneY = std::floor((gMode.h - 192) * kEdgeZone) * gMode.px;
+    float yaw, y;
+    getLook(yaw, y);
+    if (mx < w * kEdgeZone) yaw -= 0.7855f;
+    else if (mx > w * (1 - kEdgeZone)) yaw += 0.7855f;
+    // The 2006 engine steps its pitch angle between 0 and +-1.57 (P 0x407a40).
+    const float edge = release2006 ? 1.57f : 1.75f, to = release2006 ? 1.57f : 2.0f;
+    if (cy < gMode.bar + zoneY && !(y > edge)) y = y == -edge ? 0.0f : to;
+    else if (cy > sc::SCREEN_H - 2 * gMode.bar - zoneY && !(y < -edge)) y = y == edge ? 0.0f : -to;
+    if (yaw > 6.28f) yaw = 0;
+    else if (yaw < 0) yaw = 6.28f;
+    setLook(yaw, y);
+}
+
+// 0x407d10: the original's view angle (3.14 = front, 0 = back, 1.57 = left)
+// and its vertical look: the DC's look vector is (sin a, y, -cos a); the
+// 2006 engine's is (sin a, sin y, -cos a), y an angle (P 0x407a40).
+void Engine::setLook(float yaw, float y) {
+    cam.yaw = wrap180((yaw - 3.14f) * 180.0f / 3.14159265f);
+    cam.pitch = std::atan(release2006 ? std::sin(y) : y) * 180.0f / 3.14159265f;
+}
+
+void Engine::getLook(float& yaw, float& y) const {
+    yaw = cam.yaw * 3.14159265f / 180.0f + 3.14f;
+    y = std::tan(cam.pitch * 3.14159265f / 180.0f);
+    if (release2006)
+        y = std::asin(std::clamp(y, -1.0f, 1.0f));
+}
+
+float Engine::pitchLimit() const { return release2006 ? 1.57f : kPitchLimit; }
 
 bool Engine::fpsStyle() const {
     auto it = settings.find(sc::FPS_STYLE);
@@ -1007,14 +1311,14 @@ bool Engine::fpsActive() const {
 // Alternate control (0x407e20 with 0x4df8e10 = 1): every frame the view turns
 // by the pointer's distance from the screen centre (beyond one pixel), with no
 // camera speed and no ramp; up to a look y of 1.75, down to -2.0.
-void Engine::fpsCamera(double dt) {
+void Engine::fpsCamera(double dt, bool recenter) {
     int w, h;
     SDL_GetWindowSizeInPixels(window_, &w, &h);
     Canvas c = Canvas::fit(w, h);
     float density = SDL_GetWindowPixelDensity(window_);
     // Offsets in the original's screen pixels (1024x768 mode).
-    const float dx = (mouseX_ * density - w / 2.0f) / c.scale / kPx;
-    const float dy = (mouseY_ * density - h / 2.0f) / c.scale / kPx;
+    const float dx = (mouseX_ * density - w / 2.0f) / c.scale / gMode.px;
+    const float dy = (mouseY_ * density - h / 2.0f) / c.scale / gMode.px;
     const float step = kFpsLook * 60.0f * float(dt);
     float yaw = cam.yaw * 3.14159265f / 180.0f;
     float pitchY = std::tan(cam.pitch * 3.14159265f / 180.0f);
@@ -1024,7 +1328,8 @@ void Engine::fpsCamera(double dt) {
     else if (dy > 0 && pitchY >= kFpsPitchDown) pitchY -= (dy - 1) * step;
     cam.yaw = wrap180(yaw * 180.0f / 3.14159265f);
     cam.pitch = std::atan(pitchY) * 180.0f / 3.14159265f;
-    recenterPointer(false);
+    if (recenter)
+        recenterPointer(false);
 }
 
 // The pointer springs back (0x416a8c): a tenth of the way to the centre per
@@ -1072,8 +1377,21 @@ void Engine::updateRelativeMouse() {
         SDL_WarpMouseInWindow(window_, mouseX_, mouseY_);  // the system pointer reappears where ours was
 }
 
+void Engine::updateQuickLoad() {
+    if (quickLoadAt_ < 0 || realTime() < quickLoadAt_)
+        return;
+    quickLoadAt_ = -1;
+    zoomOut();
+    sound.stopAll();
+    if (loadSlot(kQuickSlot))
+        gameRunning_ = true;
+    feedback("Game loaded");
+}
+
 void Engine::update(double dt) {
     frameDt_ = dt;
+    updateQuickLoad();
+    sound.setSurround(std::holds_alternative<double>(settings[sc::SURROUND]) && std::get<double>(settings[sc::SURROUND]) != 0);
     if (menuOpen()) {
         sound.update(dt);  // menu music only; the game is paused
         updateEffects(dt);  // the menu background's clouds move on
@@ -1083,31 +1401,16 @@ void Engine::update(double dt) {
     double t = now();
     updateEffects(dt);
     if (camAnim_.active) {
-        double k = std::min(1.0, (t - camAnim_.t0) / camAnim_.duration);
-        float s = float(k * k * (3 - 2 * k));  // smoothstep
-        cam.yaw = camAnim_.fromYaw + (camAnim_.toYaw - camAnim_.fromYaw) * s;
-        cam.pitch = camAnim_.fromPitch + (camAnim_.toPitch - camAnim_.fromPitch) * s;
-        if (k >= 1) {
-            camAnim_.active = false;
-            cam.yaw = wrap180(cam.yaw);
-        }
+        stepLook(dt);
     } else if (motion && !locked && !scriptBusy() && view() && !view()->isZoom && !dragging_ && !aborted_ &&
-               !invOpen_ && !journalOpen_) {
+               !invOpen_ && !journalOpen_ && !slideshow_) {  // slideshow: the view only turns on clicks (0x416a62)
         if (fpsStyle()) fpsCamera(dt);
         else panCamera(dt);
     } else {
         panRamp_ = 0;
     }
 
-    for (size_t i = 0; i < timers_.size();) {
-        if (t >= timers_[i].at && !locked) {
-            std::string fn = timers_[i].fn;
-            timers_.erase(timers_.begin() + long(i));
-            script.start(fn);
-        } else {
-            ++i;
-        }
-    }
+    updateTimers();
     if (video_) {
         if (video_->advance(t - videoStart_))
             renderer.uploadInto(videoTex_, video_->width(), video_->height(), video_->rgba().data());
@@ -1143,10 +1446,20 @@ void Engine::drawCursor(Object* hover, int edge) {
         return;
     }
     if (menuOpen() && menuBlackUntil_ > 0 && flag(sc::WAIT)) kind = sc::WAIT;  // the menu's scSleep
-    else if (choice_ || invOpen_ || journalOpen_ || menuOpen()) kind = sc::NORMAL;
+    else if (menuOpen()) kind = sc::MENU_CURSOR;  // set on opening (0x412ed9)
+    else if (journalOpen_) {
+        // Over the pages it turns them, below them it closes the book (0x413f80).
+        float x, y;
+        canvasMouse(x, y);
+        kind = y / gMode.px > 604 ? sc::ZOOMOUT : sc::USE;
+    } else if (invOpen_) {
+        float x, y;  // over an item, with nothing held (0x414070)
+        canvasMouse(x, y);
+        kind = slotAt(x, y) >= 0 ? sc::USE : sc::NORMAL;
+    } else if (choice_) kind = sc::NORMAL;
     else if (locked || scriptBusy()) kind = sc::WAIT;
     else if (hover) kind = hover->cursor;
-    else if (edge && motion) kind = edge;  // SC_LEFT..SC_DOWN double as the pan cursors
+    else if (edge && (motion || slideshow_)) kind = edge;  // SC_LEFT..SC_DOWN double as the pan cursors
     else kind = sc::NORMAL;
     auto it = cursors.find(kind);
     if (it == cursors.end())
@@ -1160,7 +1473,14 @@ void Engine::drawCursor(Object* hover, int edge) {
             x = sc::SCREEN_W / 2.0f;
             y = sc::SCREEN_H / 2.0f;
         }
-        renderer.drawImage(*t, x - t->width / 2.0f, y - t->height / 2.0f, float(t->width), float(t->height));
+        // Always a 64 pixel quad (0x40b400), whatever the image size, reaching
+        // `lead` pixels up and left of the pointer: 8 for the menu, forward and
+        // look cursors, 24 for normal, use and zoom-out, else centred.
+        int lead = 32;
+        if (kind == sc::MENU_CURSOR || kind == sc::FORWARD || kind == sc::LOOK) lead = 8;
+        else if (kind == sc::NORMAL || kind == sc::USE || kind == sc::ZOOMOUT || kind == sc::ZOOMBACK) lead = 24;
+        const float px = gMode.px;
+        renderer.drawImage(*t, x - lead * px, y - lead * px, 64 * px, 64 * px);
     }
 }
 
@@ -1194,36 +1514,38 @@ void Engine::render() {
         drawCursor(nullptr, 0);
         return;
     }
-    if (invOpen_)
-        renderer.setTint(0.9f, 0.75f, 0.5f);  // the inventory's sepia backdrop (0x409680)
-    if (v && !v->isZoom) {
-        for (const auto& f : v->faces)
-            renderer.texture(res, f);
-        Viewport vp = nodeViewport();
-        drawNodeScene(*v, vp);
-        if (showHotspots())
-            renderer.drawNodeHotspots(*v, cam, vp);
-    } else if (v) {
-        ZoomRect zr = zoomRect(*v);
-        if (auto* t = renderer.texture(res, v->image)) {
-            renderer.drawImage(*t, zr.x, zr.y, zr.w, zr.h);
-            drawZoomEffects(*t, zr);
+    // The inventory screen (0x409680) replaces the scene: the frame captured
+    // on opening, in sepia, fading to half while the icons fade in.
+    if (invOpen_) {
+        drawInventoryBackdrop();
+    } else {
+        if (v && !v->isZoom) {
+            for (const auto& f : v->faces)
+                renderer.texture(res, f);
+            Viewport vp = nodeViewport();
+            drawNodeScene(*v, vp);
+            if (showHotspots())
+                renderer.drawNodeHotspots(*v, cam, vp);
+        } else if (v) {
+            ZoomRect zr = zoomRect(*v);
+            if (auto* t = renderer.texture(res, v->image)) {
+                drawZoomScene(*v, *t, zr);
+            }
+            if (showHotspots()) {
+                float sx = zr.w / kZoomW, sy = zr.h / kZoomH;
+                for (auto& o : v->objects)
+                    if (o->enabled)
+                        renderer.drawRect(zr.x + o->rect.x * sx, zr.y + o->rect.y * sy, o->rect.w * sx, o->rect.h * sy, 1, 0.8f, 0, 0.3f);
+            }
         }
-        if (showHotspots()) {
-            float sx = zr.w / kZoomW, sy = zr.h / kZoomH;
-            for (auto& o : v->objects)
-                if (o->enabled)
-                    renderer.drawRect(zr.x + o->rect.x * sx, zr.y + o->rect.y * sy, o->rect.w * sx, o->rect.h * sy, 1, 0.8f, 0, 0.3f);
-        }
+        // Overlays cover the 3D view area (0x40aae0 draws them between the UI bars).
+        if (overlay)
+            if (auto* t = renderer.texture(res, overlay->args[0]))
+                renderer.drawImage(*t, 0, gMode.bar, sc::SCREEN_W, sc::SCREEN_H - 2 * gMode.bar);
     }
-    // Overlays cover the 3D view area (0x40aae0 draws them between the UI bars).
-    if (overlay)
-        if (auto* t = renderer.texture(res, overlay->args[0]))
-            renderer.drawImage(*t, 0, kBar, sc::SCREEN_W, sc::SCREEN_H - 2 * kBar);
-
-    renderer.setTint(1, 1, 1);
     drawGamma();
-    drawTransition();
+    if (!invOpen_)
+        drawTransition();
 
     ensureFont();
     if (invOpen_)

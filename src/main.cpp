@@ -25,7 +25,7 @@ void usage() {
         "\n"
         "  --data DIR        directory with scream.sc, scratches.sc, *.res (repeatable;\n"
         "                    later directories override earlier ones)\n"
-        "  --script NAME     game script to run (default scratches.sc)\n"
+        "  --script NAME     game script to run (default: scream.cfg SCRIPT + .sc or .lua)\n"
         "  --game sdc|tlv    skip the intro and menu and start that game\n"
         "  --start ROOM[:NODE]  skip the game intro and start at a location\n"
         "  --yaw DEG --pitch DEG  initial view direction\n"
@@ -34,8 +34,9 @@ void usage() {
         "  --exec LUA        run Lua as a handler once startup is idle; debugClick(name)\n"
         "                    clicks an object in the current view, debugKey(vk) presses a key\n"
         "  --save-dir DIR    keep saves and preferences in DIR (for tests)\n"
-        "  --fullscreen      run fullscreen\n"
-        "  --window WxH      window size (default 1024x768)\n"
+        "  --fullscreen      run fullscreen (default: scream.cfg FULLSCREEN)\n"
+        "  --windowed        run in a window\n"
+        "  --window WxH      window size (default: scream.cfg WIDTH x HEIGHT)\n"
         "  --hotspots        draw clickable areas (SC_SHOW_HOTSPOTS)\n"
         "  --trace           log every sc* call\n"
         "  --api-status      print implementation status of all sc* functions\n"
@@ -94,14 +95,35 @@ void printApiStatus() {
     std::printf("\n%d functions: %d done, %d partial, %d stub\n", n, counts[0], counts[1], counts[2]);
 }
 
-int run(const Options& opts, const std::string& script) {
+int run(const Options& opts, std::string script) {
     Engine engine(opts);
     api::registerAll(engine);
     if (opts.verifyMedia)
         return verifyMedia(engine);
 
     auto boot = engine.findData("scream.sc");
-    auto game = engine.findData(script);
+    // scream.exe runs SCRIPT.sc, else SCRIPT.lua (0x4061d0); Windows file names
+    // ignore case ("SCRATCHES" in the shipped cfg).
+    auto findAnyCase = [&](const std::string& name) -> std::filesystem::path {
+        if (auto p = engine.findData(name); !p.empty())
+            return p;
+        auto lower = [](std::string s) {
+            for (char& c : s) c = char(std::tolower(static_cast<unsigned char>(c)));
+            return s;
+        };
+        for (auto it = opts.dataDirs.rbegin(); it != opts.dataDirs.rend(); ++it) {
+            std::error_code ec;
+            for (const auto& e : std::filesystem::directory_iterator(*it, ec))
+                if (lower(e.path().filename().string()) == lower(name))
+                    return e.path();
+        }
+        return {};
+    };
+    std::filesystem::path game;
+    if (!script.empty()) game = findAnyCase(script);
+    else if (!(game = findAnyCase(engine.config.script + ".sc")).empty()) script = game.filename().string();
+    else if (!(game = findAnyCase(engine.config.script + ".lua")).empty()) script = game.filename().string();
+    else script = engine.config.script + ".sc";
     if (boot.empty() || game.empty()) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "need scream.sc and %s in the data directories", script.c_str());
         return 1;
@@ -124,7 +146,7 @@ int run(const Options& opts, const std::string& script) {
 
 int main(int argc, char** argv) {
     Options opts;
-    std::string script = "scratches.sc";
+    std::string script;  // default: scream.cfg's SCRIPT
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         auto next = [&]() -> std::string {
@@ -141,7 +163,8 @@ int main(int argc, char** argv) {
         else if (a == "--screenshot") opts.screenshot = next();
         else if (a == "--screenshot-at") opts.screenshotAt = std::stod(next());
         else if (a == "--exec") opts.exec = next();
-        else if (a == "--fullscreen") opts.windowed = false;
+        else if (a == "--fullscreen") opts.fullscreen = 1;
+        else if (a == "--windowed") opts.fullscreen = 0;
         else if (a == "--window") { std::string v = next(); opts.windowW = std::stoi(v); opts.windowH = std::stoi(v.substr(v.find('x') + 1)); }
         else if (a == "--trace") opts.trace = true;
         else if (a == "--hotspots") opts.hotspots = true;

@@ -96,7 +96,10 @@ int scGet(lua_State* L) {
         return 1;
     }
     case sc::TXT_SPEED: case sc::MOV_SPEED: case sc::HINTS: lua_pushnumber(L, number(key)); return 1;
-    default: lua_pushnumber(L, 0); return 1;
+    default:
+        if (E->release2006) return 0;  // the 2006 engine returns nothing for other keys (P 0x410380)
+        lua_pushnumber(L, 0);
+        return 1;
     }
 }
 
@@ -113,15 +116,17 @@ int setEnabled(lua_State* L, bool on) {
     if (on) E->flags.insert(key);
     else E->flags.erase(key);
     // These keys share their variable with the setting of the same name (0x40fa60).
-    if (key == sc::HINTS || key == sc::SHOW_HOTSPOTS || key == sc::SURROUND)
+    if (key == sc::HINTS || key == sc::SHOW_HOTSPOTS || key == sc::SURROUND || key == sc::FULLSCREEN ||
+        key == sc::DEBUG)
         E->settings[key] = on ? 1.0 : 0.0;
+    if (key == sc::LOG)
+        E->setLogging(on);
     return 0;
 }
 int scEnable(lua_State* L) { return setEnabled(L, true); }
 int scDisable(lua_State* L) { return setEnabled(L, false); }
 
-// scream.cfg-style "KEY value" pairs (0x40f4a0); window and audio-device keys
-// are recorded but don't reconfigure the running engine.
+// scream.cfg's parser (0x40f4a0); the mode keys only matter before scInit.
 int scLoadSettings(lua_State* L) { E->loadSettings(argStr(L, 1)); return 0; }
 
 // Presets for SC_SKY_COLOR / SC_CLOUD_COLOR / SC_SCREEN_COLOR; a third argument of 1
@@ -233,12 +238,19 @@ int scLookAt(lua_State* L) {
 
 // As in scream.exe (0x4124a0): camera input is off while sleeping and wait
 // mode is on; afterwards motion is re-enabled unconditionally.
+// scSleep (0x4124a0): the camera is held (the 2006 engine leaves it free,
+// P 0x410230) and the wait cursor shows. In the DC, Esc ends the sleep and
+// stops every playing channel (0x419b80), which skips the logo sequences.
 int scSleep(lua_State* L) {
     double until = E->now() + argNum(L, 1);
-    E->motion = false;
+    if (!E->release2006) E->motion = false;
     setWaitMode(true);
+    ++E->sleeping_;
     return E->script.wait(L, [until] {
-        if (E->now() < until) return false;
+        const bool skipped = E->sleepSkip_;
+        if (!skipped && E->now() < until) return false;
+        if (skipped) E->sound.stopChannels();
+        if (--E->sleeping_ == 0) E->sleepSkip_ = false;
         E->motion = true;
         setWaitMode(false);
         return true;
@@ -388,8 +400,8 @@ int scChoiceRemove(lua_State* L) {
 
 // ---------------------------------------------------------------- timers
 
-int scTimerCreate(lua_State* L) { E->addTimer(argNum(L, 2), argStr(L, 3), false); return 0; }
-int scTimerCreateGlobal(lua_State* L) { E->addTimer(argNum(L, 2), argStr(L, 3), true); return 0; }
+int scTimerCreate(lua_State* L) { E->addTimer(argInt(L, 1), argInt(L, 2), argStr(L, 3), false); return 0; }
+int scTimerCreateGlobal(lua_State* L) { E->addTimer(argInt(L, 1), argInt(L, 2), argStr(L, 3), true); return 0; }
 
 // ---------------------------------------------------------------- tracks (music)
 
@@ -418,8 +430,8 @@ int scTrackPlay(lua_State* L) {
     E->sound.playTrack(*it->second);
     return 0;
 }
-int scTrackStop(lua_State* L) { E->sound.stopTrack(argStr(L, 1)); return 0; }
-int scTrackFadeOut(lua_State* L) { E->sound.fadeOutTrack(argNum(L, 1)); return 0; }
+int scTrackStop(lua_State*) { E->sound.stopTrack(); return 0; }
+int scTrackFadeOut(lua_State* L) { E->sound.fadeOutTrack(argInt(L, 1)); return 0; }
 
 // ---------------------------------------------------------------- sound effects
 
@@ -459,7 +471,11 @@ int scPlaylistQueue(lua_State* L) {
     return 0;
 }
 int scPlaylistStart(lua_State* L) { E->sound.playlistStart(); return 0; }
-int scPlaylistStop(lua_State* L) { E->sound.playlistStop(lua_isnumber(L, 1) ? argNum(L, 1) : -1); return 0; }
+int scPlaylistStop(lua_State* L) {
+    const int f = argInt(L, 1);  // nil reads as 0
+    E->sound.playlistStop(f, f < 0);
+    return 0;
+}
 int scPlaylistNext(lua_State* L) { E->sound.playlistNext(); return 0; }
 int scPlaylistPrevious(lua_State* L) { E->sound.playlistPrevious(); return 0; }
 int scPlaylistFirst(lua_State* L) { E->sound.playlistFirst(); return 0; }
@@ -512,7 +528,7 @@ const Entry kEntries[] = {
     FN(scJournalClear, S::Done, ""),
     FN(scJournalSet, S::Done, "book opens from the bound item"),
     FN(scJournalShow, S::Done, ""),
-    FN(scLoadSettings, S::Done, "scream.cfg keys; display/audio keys recorded only"),
+    FN(scLoadSettings, S::Done, "scream.cfg parser; mode keys apply at scInit"),
     FN(scLoadSubtitle, S::Done, ".srt cues timed as 0x4180b0"),
     FN(scLock, S::Done, "boolean, as in scream.exe"),
     FN(scLookAt, S::Done, ""),
@@ -538,7 +554,7 @@ const Entry kEntries[] = {
     FN(scPlaylistPrevious, S::Done, ""),
     FN(scPlaylistQueue, S::Done, ""),
     FN(scPlaylistStart, S::Done, ""),
-    FN(scPlaylistStop, S::Done, "per-track repeat/fade fields approximated"),
+    FN(scPlaylistStop, S::Done, "fade rate per audio tick: tick length assumed (2 ms)"),
     FN(scReaction, S::Done, ""),
     FN(scRun, S::Done, "main loop: intro, menu, game"),
     FN(scScriptAdd, S::Done, ""),
@@ -552,10 +568,10 @@ const Entry kEntries[] = {
     FN(scTerminate, S::Done, ""),
     FN(scTexture, S::Done, ""),
     FN(scTextureUpdate, S::Done, ""),
-    FN(scTimerCreate, S::Done, "cancelled on leaving the node (assumed)"),
+    FN(scTimerCreate, S::Done, ""),
     FN(scTimerCreateGlobal, S::Done, ""),
     FN(scTrackFadeOut, S::Done, ""),
-    FN(scTrackPlay, S::Done, "stereo: front file only"),
+    FN(scTrackPlay, S::Done, ""),
     FN(scTrackSet, S::Done, ""),
     FN(scTrackSet3D, S::Done, ""),
     FN(scTrackSetEx, S::Done, ""),

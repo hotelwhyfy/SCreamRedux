@@ -252,7 +252,9 @@ ECX), so Ghidra's decompiler hides arguments; read the disassembly alongside. Sc
 - `scWait`/`scGo`: wait mode `0x48bc10` — the cursor (wait cursor) is drawn while locked; only
   if SC_WAIT is enabled (`0x4df8de4`, default on, key 25 in scEnable/scDisable).
 - `scMotion`/`scStill`: `0x48bc08` gates camera input. `scSleep` (`0x4124a0`) clears it and
-  enters wait mode for the duration, then sets motion back to 1 unconditionally.
+  enters wait mode for the duration, then sets motion back to 1 unconditionally. While it
+  waits it peeks the message queue (`0x419b80`, PM_REMOVE): Esc ends the sleep and stops every
+  playing channel (how the logo sequences are skipped); other input is dropped.
 - Camera (`0x407e20`, `0x40df60`): yaw in radians; pitch is the look vector's y, clamped to
   ±1.75 (~60.3°). Edge zones are 15% of the width; vertically 15% of (H−192) from the top bar
   and from H−128. Rate per frame = depth_px × 0.005 × CAM_SPEED/1000 × ramp × 60/fps; ramp
@@ -282,15 +284,50 @@ ECX), so Ghidra's decompiler hides arguments; read the disassembly alongside. Sc
   it with a crossfade and the leave sound.
 - `scChoiceClear` sets the option count to 0; `scChoiceRemove` deletes the option at +0x38
   (the last pick) and shifts the rest.
+- Music and fades (`0x4161f0`, `0x401310`): a track plays on channels 1–3 (front, plus the
+  -RL/-RR files when SURROUND is on; with a stereo device all three just mix). scTrackPlay
+  always hard-stops channels 1–3 and restarts (volume SC_VOLUME/10, looping per scTrackSet's
+  second argument). Fades are **rates**: every audio-thread tick the gain moves 0.0025/F
+  toward its target (F = 0: no fade); the tick is a `Sleep(1)` loop whose length isn't in the
+  binary — taken as 2 ms (the scripts' `scTrackFadeOut(1) scSleep(1) scTrackStop()` fits).
+  scTrackFadeOut(n) uses F = 1 when fewer than n whole seconds remain, never stops the track;
+  a negative n reads the last queued playlist track's SC_FADEOUT (as compiled). scFXSet
+  fades are the same rates; a fade-in starts from silence. scTrackPlay/Stop/FadeOut are
+  ignored while the playlist plays.
 - `scPlaylist*` (`0x4165e0`–`0x4168f0`, driven from `0x40ee00`): up to 38 tracks, 1-based
-  index; Next/Previous clamp; when a track ends the index advances and wraps; changes
-  crossfade between two music slots. Per-track repeat count/fade time fields (+0xd4/+0xd0)
-  are approximated.
+  index, banks of channels 1–3 / 4–6. A track's loop field is its number of plays (0 = for
+  ever); SC_FADEOUT seconds before the end of its last play the next starts on the other bank
+  and the old one fades at that rate and is cut at the next one-second tick; SC_FADEIN applies
+  only on the first play; the volume drops 0.25 during dialogue. Next/Previous/First/Last
+  start the new track without fading the old one (they overlap). scPlaylistStop(n): fade at
+  rate n (1 if less than n s left), cut after n s; nil/0 lets the track play out.
+- Timers (`0x412220` local, `0x412330` global, ticked by `0x412010`): entries of 0x44 bytes
+  (id, seconds, elapsed, active, function name, callback); local ones live in the **bound
+  room**, global ones in the world, at most 31 each. Re-creating an id re-arms that timer,
+  except the newest one (the search scans 0..count−1 of a 1-based table), which gets a
+  duplicate. Once a second: global timers count only in node state (4000), the current room's
+  in any state; a timer fires on its Nth tick and stays inactive. Nothing cancels them: a
+  room's timers pause while the player is elsewhere. Saved games keep them all.
 - No-ops in the original: `scAttach` (calls an empty function), `scMusicPlay/Stop/FadeIn/FadeOut`.
 - `scAbort` (`0x4106d0`): stop playlist, wait for a key/click, return to the main menu.
   `scMenuShow` calls that same menu routine (`0x412cb0`); `scJournalShow` → `0x418580`.
-- `scLoadSettings(file)` (`0x40f4a0`): scream.cfg keys SCRIPT, RESOURCE, WIDTH, HEIGHT, DEPTH,
-  QUALITY, FULLSCREEN, SURROUND, VSYNC, AUDIO_DEVICE, BUFFER_SIZE, NUM_BUFFERS, DEBUG, LANGUAGE.
+- `scLoadSettings(file)` = the scream.cfg parser (`0x40f4a0`, run at startup by `0x4061d0`
+  after the defaults `0x40f260`): `fscanf("%s")` over the whole file, so there is no line,
+  comment or section syntax — a word equal to a key (case-sensitive) takes the next word; a
+  failed `%d` keeps the previous number and leaves the word to be read as a key. Keys
+  (default): SCRIPT ("main"; runs SCRIPT.sc, else .lua), RESOURCE ("game.res" = SC_RES_FILE),
+  PATH (".\" + "\" = SC_RES_PATH), WIDTH/HEIGHT (1024/768: the mode and every pixel layout),
+  DEPTH (32), QUALITY (3; only 0 matters: GL_NEAREST everywhere), FULLSCREEN (1), SURROUND (1;
+  the shipped files say 0), LOG (0: scream.log), VSYNC (1: wglSwapIntervalEXT(1); 0 calls
+  nothing), RATE (0), AUDIO_DEVICE (0; used only with DEBUG), BUFFER_SIZE (32768),
+  NUM_BUFFERS (4), DEBUG (0: audio device listing only), LANGUAGE ("en"; read only by scGet
+  and the hidden menu row). The 2006 exes lack DEBUG; the retail one LANGUAGE too.
+- scLookAt (`0x412670`): instant from a table (`0x41263c`): front (3.14, 0), back (0, 0), left
+  (1.57, 0), right (4.71, 0), up (3.14, y 6.28), down (3.14, y −1.57). Smooth (table
+  `0x412654`; back = 0 or 6.28, whichever is nearer; down = front, level, as compiled): with
+  the lock flag set and the wait cursor, each frame moves each angle by (1 + remaining)·0.01·
+  60/fps until a step covers the rest. Two cases where that loop would never end (a remaining
+  angle below −1, and a pitch already exactly on target) are made to finish.
 
 ### Inventory, journal, menu (from the scripts and `scream.exe`)
 
@@ -300,8 +337,9 @@ ECX), so Ghidra's decompiler hides arguments; read the disassembly alongside. Sc
 - `scInventorySet(icon, label, failText, failVoice)`: the last two play when a held item is
   used where it has no reaction ("That doesn't work.", the magnifying glass's "Not much to see
   here...").
-- Inventory draw (`0x409680`): the frozen view tinted (0.9, 0.75, 0.5), icons of `SC_INV_SIZE`
-  in rows of 10, in a 1024-wide virtual space.
+- Inventory draw (`0x409680`) replaces the scene: the frame captured on opening, tinted
+  (0.9, 0.75, 0.5) at alpha 1 − p, the icons (`SC_INV_SIZE`, rows of 10) at alpha 2p, with p
+  rising by SC_MOV_SPEED·0.001 per frame to 0.5 and staying there: a half-dark sepia still.
 - Hints: with `scHints(SC_HINTS_ACTIVE)` and SC_HINTS on, opening shows `HINTS_OPEN`, grabbing
   the `HINTS_ITEM` item shows `HINTS_GRAB`, closing with it held shows `HINTS_CLOSE`.
 - `scJournalSet(image, font, open, turn, close)` attaches the journal to the bound item.
@@ -317,7 +355,7 @@ ECX), so Ghidra's decompiler hides arguments; read the disassembly alongside. Sc
   The book opens at the page last shown.
 - Inventory grid (hit test `0x417c90`, state 0xfa3): slot (row, col) at x = 32 + col·(32 +
   size), y = 64 + 96·row, size×size, 10 per row (1024×768 pixels). The inventory draw itself
-  shows no text; our hover label is an addition. Opening and closing crossfade like a view
+  shows no text and doesn't dim or label the icon under the pointer. Opening and closing crossfade like a view
   switch (capture `0x407ad0` at `0x4174e7` / `0x417512`, then state 0xfa3 / 0xfa6); it doesn't
   open in a dream (SC_DREAM, `0x4df8dfc`) or with nothing in slot 1 (`0x403d20(1)`).
 - Cursor (`0x40b400`, set by `0x40b6f0`: 0xc9–0xcb set the mode `0x48bad8`, other values the
@@ -344,14 +382,39 @@ ECX), so Ghidra's decompiler hides arguments; read the disassembly alongside. Sc
   a new game during one asks "Start a new game?", then the game choice with no way back.
   Load/save close the menu first ("Game loaded/saved" as feedback); the quicksave row can't be
   saved to. The setup items call the key handler (F1/F2/F9/F10/F12); slideshow mode and
-  alternate control toggle their flags (and reset the look to angle 3.14, y 0 via `0x407d10`,
-  not reproduced); an undrawn 8th row (hit 13) sets the Lua "language" global (not ported).
+  alternate control toggle their flags and reset the look to angle 3.14, y 0 (`0x407d10`);
+  an undrawn 8th row (hit 13) shows "english" when LANGUAGE is "en" and calls a Lua
+  `language()` that no script defines (`0x413d5e`).
   Opening: capture, the "black" zoom for scSleep(1), crossfade to the menu, menu music; closing:
   music fades, black for scSleep(2), crossfade. Background (scMenuSetEx(SC_IMAGE), `0x4083c0`):
-  the image added (ONE, ONE) over the view area, the cloud layers (`0x40d990`), then the image
-  with alpha. Feedback text shows in the menu, not under a prompt. Esc does nothing there.
-- Saves are this port's own format (`src/save.cpp`): script globals as a diff against the
-  start-of-game baseline, plus world/engine state. A new game restores that baseline.
+  the image added (ONE, ONE) on a fixed quad (x 0..1312, GL y 704..−685: an 800×472 image in
+  a 1024 texture, so the view area of the 1024×768 mode), the cloud layers (`0x40d990`), then
+  the image with alpha. Feedback text shows in the menu, not under a prompt. Esc does nothing.
+- Slideshow mode (`0x4df8ddc`): no continuous camera (`0x416a62`); a click in an edge zone
+  (`0x407d50`: a vertical zone wins in a corner and needs |y| ≤ 1.25) captures the screen,
+  steps the view once and takes the click (`0x4173be`), even under scStill/scWait or with an
+  item held: ±0.7855 rad sideways; up/down set y to ±2.0 (0 only from exactly ∓1.75, which
+  doesn't happen). The zone shows its arrow cursor instead of hotspots (`0x414448`). With
+  alternate control on as well, a click applies one frame of that turn.
+- Cursors (`0x40b400`): always a 64-pixel quad, reaching 8 px up-left of the pointer for the
+  menu/forward/look cursors, 24 px for normal/use/zoom-out, centred otherwise (wait, arrows,
+  items). The menu shows SC_MENU's cursor (`0x412ed9`), the journal "use" over the pages and
+  "zoom out" below y 604 (`0x413f80`), the inventory "use" over an item (`0x414070`).
+- Saved games are scream.exe's own files (`src/save.cpp`; writer `0x411370`, reader
+  `0x4107d0`): `scream.001`–`.010`, `.011` the quicksave; an 80-byte description (the script's
+  `save()`, "quicksave" for F5), every numeric global as a `key=value` Lua line, the 700-byte
+  settings block `0x4df8b64`, the journal, the font, the look, state/room, timers, then every
+  room (current/entry node, zoom stack, local timers), node (faces, masks), zoom, object
+  (enabled), item (icon, label, fail text, voice) and inventory slot by 1-based creation index
+  (zoom 1 is the engine's "black"), 17 sound channel records and the playlist block. The
+  reader runs the Lua lines, restores the whole settings block (gamma, speeds, flags,
+  ambience…), switches to the room (its onEnter runs) and back into the zoom stack. The 2006
+  layout (P `0x40f1f0`) drops the journal, font, ambience, DEBUG/alternate control and item
+  voice and has smaller rooms/items/playlist; its pitch is an angle. No exe has a name entry:
+  the manual's "enter a name" doesn't describe them. F7 shows the "black" zoom for a second
+  while everything fades, then loads. "Game saved/loaded" show even when the file failed.
+  Loading here first restores the start-of-game baseline (the original leaves non-saved state
+  as it was in memory). A new game restores that baseline.
 
 ### Text: feedback, subtitles, dialogue, choices (from `scream.exe`)
 
@@ -424,15 +487,33 @@ ECX), so Ghidra's decompiler hides arguments; read the disassembly alongside. Sc
 - `scEnable`/`scDisable` keys → flags (`0x40fa60`): SKY `0x4df8de8`, NIGHT `…dec`, RAIN `…df4`,
   FOG `…df8`, GLOW `…df0` (never read), DREAM `…dfc`, CANDLE `…e00`, LAMP `…e04`, WAIT `…de4`;
   HINTS / SHOW_HOTSPOTS / SURROUND share their setting's variable.
-- Each face's `<texture>_msk.tga` (512² grey) is its alpha: black areas show a backdrop. With
-  SC_SKY a dome tinted by the SKY_COLOR preset plus a horizon glow through `gradient.tga`, and
-  two cloud layers (`clouds1/2.tga`, or `sky_def.tga` in the 2006 data) tinted by the
-  CLOUD_COLOR preset, crossfading (`0x40d990`) and scrolling by SC_SKY_SPEED/10. Else SC_FOG:
-  dark dome + clouds1 at 50%. Else SC_RAIN: `rain_def.tga` streaks, tiled 2×, fast scroll.
+- Composite (`0x409460` nodes, `0x40a830` zooms): the backdrop is drawn from black, then each
+  face's `<texture>_msk.tga` is **added** onto it (SRC_COLOR, ONE: + m²; white where a face
+  has no mask), then the panorama is **multiplied** in (DST_COLOR, ZERO): node × (backdrop +
+  m²). The photo's own sky stays, darkened by the backdrop (why dusk looks dim). No depth
+  test; gluPerspective(fov, W/(H−128), 0.1, 1000); everything centred on the eye.
+  SC_SKY: the node cube in the sky colour (white texture), `gradient.tga` on its four sides
+  (alpha 0 at the top, the horizon colour at the bottom, t from 1/1280 + 0.251 after a one-off
+  slide at launch), the bottom face solid horizon colour, then two cloud layers on the dome.
+  Else SC_FOG: a 0.25 grey cube and clouds1 at 50% on the dome, twice per frame (the scroll
+  advances on each call). Else SC_RAIN: a white cube and `rain_def.tga` ×2 on two side-on
+  hemispheres, (DST_COLOR, 1−SRC_ALPHA) then (ONE, 1−SRC_ALPHA); its masks go on with
+  (DST_COLOR, ONE). Lighting passes redraw the whole panorama (no mask).
+  Zooms: no backdrop under SC_NIGHT; otherwise the backdrop as seen from the node, the zoom's
+  `<image>_msk.tga` (white if none) as a quad over the view — fog (DST_COLOR, ONE), rain
+  (SRC_COLOR, DST_COLOR), else (SRC_COLOR, ONE) — then the zoom multiplied in. Fog in a zoom
+  has no grey cube and one fog pass.
+- Dome (`0x418690(150, 5, 5, 12, 4)`, the classic GenerateDome): rings every 5° from the pole,
+  four vertices per step as one triangle strip (5184), u = 12·atan2(x, z)/2π + 0.5,
+  v = 4·asin(y)/π + 0.5 with the seam fix (0.9 / 0.8). Clouds and fog: translate (0, −100, 0),
+  rotate 270° about x (apex 50 above the eye). Rain: ±270° about y, not moved. Cloud layers
+  share the dome's uv, scrolled on v by 5e-5·int(SKY_SPEED/10) per frame; SKY_SPEED defaults
+  to 15 (`0x40f370`). Layer 2 is the cloud colour −0.05; they crossfade (0.002/frame, pauses
+  0.015) between 0.5 and 1. Rain scrolls 0.035/frame.
 - Presets (sky / horizon / clouds): DAWN (1,.8,.55)/(.8,.05,.05)/(1,.7,.55); MORNING
   (.9,.9,.9)/(.55,.65,.8)/(.75,.75,.75); DUSK (.45,.5,.6)/(1,0,0)/(.95,.55,.45); STORM
-  (.7,.7,.9)/(.15,.15,.8)/(.3,.3,.3). Changes fade at 0.0001/frame unless the third
-  scSetAmbience argument is 1. SCREEN_COLOR is stored but its use hasn't been found.
+  (.7,.7,.9)/(.15,.15,.8)/(.3,.3,.3). Changes fade at 0.0001/frame (the cloud colour twice, once
+  per layer), only on frames that draw the sky, unless the third scSetAmbience argument is 1.
 - Lighting (`0x409b50`): NIGHT draws the scene again tinted (.1,.1,.5) at 50%. RAIN without a
   candle: storm dimming plus lightning on a 30.5 s schedule (flashes at 10, 10.15, 15, 20, 20.2,
   30 s; strengths 0.25/0.5/0.75 additive + white wash). CANDLE/LAMP: warm (1,.75,.5) additive
@@ -441,6 +522,27 @@ ECX), so Ghidra's decompiler hides arguments; read the disassembly alongside. Sc
   35° and 55° at 0.005°/frame. (SC_DEF_FOV 53 in scream.sc is not what the renderer uses.)
 
 ## 2006 release
+
+The 2006 executables (retail and patch; P = `extracted/patch/scream.exe`) are the same code a
+year older. Where they behave differently the port follows them when the 2006 game runs
+(`Engine::release2006`):
+- 800×600 (its cfg and defaults): every pixel layout at that scale.
+- Projection gluPerspective(53, W/H) into the W×(H−128) view, faces on a 30×40×30 box
+  (RATIOX/RATIOY; hotspots scaled ×1.33 to match), SC_DREAM 43–63° (P `0x40c370`, `0x407840`).
+- Pitch is an angle: look = (sin a, sin p, −cos a), clamped ±1.57 (about 45°); keys ±1.25 rad;
+  scLookAt up (6.28) therefore looks level and down 45°; smooth scLookAt turns 0.015 rad/frame
+  per axis (P `0x4103d0`); slideshow steps 0 ↔ ±1.57.
+- Text wraps at 70/140/210 characters and ignores 256+ (P `0x40c500`); "test speed FAST".
+- Inventory 8 icons per row, hit rows from y 96, icons drawn 8 px higher (P `0x408fa0`).
+- Menu: one game (new game starts it, asking first during a game), 6 setup rows (no alternate
+  control), the background at its own size, centred (P `0x407ed0`).
+- Sky: a white cube under one cloud layer, untinted, scrolling 0.00015/frame; the clouds are
+  generated at startup (P `0x40be00`: Hugo Elias value noise, 32×32 smoothed map seeded by
+  Watcom `rand() % 5000` — made three times, the last kept — four octaves over 256², cover
+  205, sharpness 0.996; `sky_def.tga` is unused and different). Dome (160, 5, 5, 16, 8). Fog: a
+  grey cube and, twice, the clouds tiled ×0.25 on two side-on hemispheres drifting apart
+  sideways at 0.0001/call, (ONE, 1−SRC_ALPHA). Rain scrolls 0.045/frame. No ambience presets.
+- scSleep keeps the camera free and has no Esc skip; scGet returns nothing for other keys.
 
 - Its scripts are Lua 5.0 bytecode; `src/lua50.cpp` translates each chunk to 5.1 at load
   (layout, instruction fields, RK encoding, opcode numbers; 5.0 TEST = 5.1 TESTSET). The
@@ -459,12 +561,11 @@ saves). Ghidra on `scream.exe` covers semantics the scripts don't reveal.
 
 ## Open questions
 
-- Original save game format (only matters if we want to load original saves).
 - Exactly when the two zoom sounds play (`0x416120`, `0x4160d0`).
-- Playlist per-track repeat count and fade-time fields.
-- Whether `scTimerCreate` timers are cancelled on leaving the node (currently assumed).
-- What the 2006 executable (and its patch) does differently from the DC one; we run the 2006
-  scripts on the DC engine model. One known case: the 2006 `newGame` calls `changeTime(9)`
-  before entering a room, so `changeTime`'s `scGet(SC_ROOM)` is empty and its
-  `scBind(SC_ROOM, aux)` finds nothing (the DC swapped the two calls). In the DC exe that
-  `scGet` would be the fatal "GetCurr: target not bound", so the 2006 exe must differ there.
+- The audio thread's tick length (fade durations scale with it; 2 ms assumed).
+- The net effect of the reader's ZOOM + ZOOMOUT after loading a game saved in a zoom (the
+  zoom stack is restored as saved).
+- Saved games are untested against files from the original executables (none available).
+- The 2006 `newGame` calls `changeTime(9)` before entering a room, so `scGet(SC_ROOM)` is the
+  empty room slot 0 and `scBind(SC_ROOM, "")` finds nothing; GetCurr doesn't check the slot
+  (P `0x403710`, D `0x4037d0`), so this isn't fatal in either exe.

@@ -44,6 +44,7 @@ constexpr int STEREO = 40, VOLUME = 41, FADEIN = 42, FADEOUT = 43;
 
 // Cursors (scOnHover / scCursor)
 constexpr int NORMAL = 21, FORWARD = 22, LOOK = 23, USE = 24, WAIT = 25;
+constexpr int MENU_CURSOR = 3005;  // SC_MENU, as scCursor's key for the menu cursor
 
 // Audio channels (scFXPlayEx / scFXSet / scFXStop)
 constexpr int STEP = 8, A3DA = 9, A3DB = 10, A3DC = 11, A3DD = 12, DIALOGUE = 13, FX = 14;

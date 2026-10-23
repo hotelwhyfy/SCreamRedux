@@ -32,6 +32,7 @@ struct Reaction {
 
 struct Object {
     std::string name;
+    int index = 0;         // creation order, 1-based, across all views (the original's table index)
     int face = 0;          // cube face, or sc::ZOOM inside a zoom (where it is ignored)
     Rect rect;
     int cursor = 0;        // scOnHover
@@ -43,6 +44,7 @@ struct Object {
 // A node (cube panorama) or zoom (2D close-up); both hold clickable objects.
 struct View {
     std::string name;
+    int index = 0;  // creation order among nodes, or among zooms (zoom 1 is the engine's "black")
     bool isZoom = false;
     std::array<std::string, 6> faces;  // node: indexed by face - 1
     std::string image;                 // zoom
@@ -53,13 +55,24 @@ struct View {
     std::vector<Object*> find(const std::string& objectName);
 };
 
+// scTimerCreate / scTimerCreateGlobal entry (0x412220, 0x44 bytes).
+struct GameTimer {
+    int id = 0;
+    int seconds = 0;
+    int elapsed = 0;
+    bool active = true;
+    std::string fn;
+};
+
 struct Room {
     std::string name;
+    int index = 0;  // creation order, 1-based
     std::vector<std::unique_ptr<View>> nodes;
     std::vector<std::unique_ptr<View>> zooms;
     std::string lastVisited;  // scSetLastVisited; node entered by scSwitch(SC_ROOM)
     std::string onEnter;      // scOnEnter: handler run after the room is entered
     std::string onExit;       // scOnExit: stored, but scream.exe never calls it
+    std::vector<GameTimer> timers;  // scTimerCreate: run only while this is the current room
 
     View* node(const std::string& n);
     View* zoom(const std::string& n);
@@ -67,6 +80,7 @@ struct Room {
 
 struct Item {
     std::string name;
+    int index = 0;  // creation order, 1-based
     std::string icon, label, text, voice;  // scInventorySet
     std::vector<Reaction> reactions;       // scInventoryReaction
 };
@@ -97,6 +111,7 @@ struct Overlay {
 
 struct Track {
     std::string name;
+    int index = 0;  // creation order, 1-based
     std::array<std::string, 3> files;  // stereo: [0]; surround: front, rear-left, rear-right
     bool surround = false;
     int loop = 0;
@@ -148,6 +163,15 @@ public:
     // unlike nodes, which are looked up in the bound room.
     View* zoom(const std::string& name) const;
     std::vector<View*> zoomOrder;  // every zoom, in creation order
+
+    // Every scCreate takes the next index of its kind (0x402f50); index 0 is
+    // never used, and zoom 1 is the "black" zoom scInit creates (0x410418).
+    // These lists hold each kind by index (nullptr where nothing of ours is).
+    std::vector<Room*> roomList{nullptr};
+    std::vector<View*> nodeList{nullptr}, zoomList{nullptr, nullptr};
+    std::vector<Object*> objectList{nullptr};
+    std::vector<Item*> itemList{nullptr};
+    std::vector<Track*> trackList{nullptr};
 
 private:
     std::vector<int> scopes_;

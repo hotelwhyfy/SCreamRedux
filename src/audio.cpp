@@ -16,6 +16,9 @@ struct Audio::Voice {
     int channels = 2;
     bool loop = false;
     std::atomic<bool> exhausted{false};  // written by the audio thread
+    std::atomic<int64_t> decoded{0};     // frames decoded since the start (or the last loop)
+    int64_t totalFrames = 0;
+    int rate = 44100;
     SDL_AudioStream* stream = nullptr;
 
     float gain = 1, fadeFrom = 1, fadeTo = 1;
@@ -70,12 +73,15 @@ void SDLCALL Audio::feed(void* userdata, SDL_AudioStream* stream, int additional
         int frames = std::min(int(sizeof buf / sizeof buf[0]) / v->channels, additional / frameBytes + 1);
         int got = stb_vorbis_get_samples_float_interleaved(v->vorbis, v->channels, buf, frames * v->channels);
         if (got == 0) {
-            if (v->loop && stb_vorbis_seek_start(v->vorbis))
+            if (v->loop && stb_vorbis_seek_start(v->vorbis)) {
+                v->decoded = 0;
                 continue;
+            }
             v->exhausted = true;
             break;
         }
         SDL_PutAudioStreamData(stream, buf, got * frameBytes);
+        v->decoded += got;
         additional -= got * frameBytes;
     }
 }
@@ -94,6 +100,8 @@ Audio::Handle Audio::play(std::vector<uint8_t> ogg, const std::string& name, boo
     }
     stb_vorbis_info info = stb_vorbis_get_info(v->vorbis);
     v->channels = info.channels;
+    v->rate = int(info.sample_rate);
+    v->totalFrames = stb_vorbis_stream_length_in_samples(v->vorbis);
     v->loop = loop;
     v->gain = v->fadeTo = gain;
 
@@ -115,6 +123,14 @@ Audio::Handle Audio::play(std::vector<uint8_t> ogg, const std::string& name, boo
 }
 
 void Audio::stop(Handle h) { voices_.erase(h); }
+
+int Audio::remainingSeconds(Handle h) const {
+    auto it = voices_.find(h);
+    if (it == voices_.end())
+        return 0;
+    const Voice& v = *it->second;
+    return int(v.totalFrames / v.rate) - int(v.decoded / v.rate);
+}
 
 bool Audio::playing(Handle h) const { return voices_.count(h) != 0; }
 

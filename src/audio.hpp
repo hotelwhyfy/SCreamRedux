@@ -29,6 +29,8 @@ public:
     Handle play(std::vector<uint8_t> ogg, const std::string& name, bool loop, float gain);
     void stop(Handle h);
     bool playing(Handle h) const;
+    // Whole seconds left to decode (ov_time_total - ov_time_tell, both truncated).
+    int remainingSeconds(Handle h) const;
     float gain(Handle h) const;
     void setGain(Handle h, float gain);
     // Ramp gain to `target` over `seconds`; optionally stop when it gets there.

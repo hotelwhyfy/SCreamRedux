@@ -31,27 +31,31 @@ never call. C++20, SDL3, OpenGL 3.3 core, Lua 5.1.5 (patched), stb, libogg/libth
   audio, text, subtitles, inventory, journal, saves, effects, keyboard, gamma,
   transitions) works; details per topic are in NOTES.md.
 
+Ported from the binary in the last round: scream.cfg (all keys, the token parser, the mode
+as the layout scale), slideshow mode, the setup menu's look reset and hidden language row,
+scLookAt's tables and easing, timers (ids, per-room, one-second ticks), the sky/fog/rain
+composite (masks added, panorama multiplied), dome geometry, music fades as rates and the
+playlist model, SURROUND rear channels, cursor quads and per-screen cursors, the inventory
+screen (frozen sepia capture), scSleep's Esc skip, and the original save files.
+
 Engine bugs the playthroughs found (all fixed, all in NOTES.md "Binding"): one object
 bound at a time; one bind slot per kind (binding a room/node/zoom keeps the object);
 a failed `scBind` unbinds; rooms remember the last node; view switches release `scLock`.
 
 ## Open items
 
-1. Menu: ported from `0x408550` (layout, prompts, black interludes). Not yet: the
-   save-name entry (the DC manual: "you will then be asked to enter a name for the
-   saved game"; the save callback `+0x244` set by `0x4135b0` is untraced), the look
-   reset when toggling slideshow/alternate control (`0x407d10(3.14, 0)`), the hidden
-   language row.
-2. Slideshow mode (`0x4df8ddc`): only the switch is ported, not the stepwise camera
-   (`0x407d50`, `0x4173be`).
-3. 2006 executable: compare its behaviour (and the 2006 patch's) with the DC one
-   where it matters (menu without the game choice, no journal/subtitles/ambience
-   API in 2006 scripts).
-4. Approximations: sky dome geometry/tiling and dusk intensity; playlist per-track
-   repeat/fade fields; original save format unknown (ours is incompatible);
-   `scTimerCreate` timers are cancelled on node change (assumption).
-5. The user's own play-through for feel and audio (automated runs are silent and
-   draw almost nothing).
+1. Untested against real files: saved games in the original formats (`src/save.cpp`, DC and
+   2006 layouts from the writers `0x411370` / P `0x40f1f0`). An original save would confirm
+   the layout (load it with F7 after copying it to the save folder as `scream.011`).
+2. Assumptions left (NOTES.md "Open questions"): the audio thread's tick (2 ms) that sets
+   fade lengths; the reader's ZOOM+ZOOMOUT after loading in a zoom; the 2006 cloud generator's
+   seed state (Watcom rand, never seeded).
+3. Deliberate differences: the window scales the configured mode (the original changed the
+   display mode or laid out in real pixels); loading restores the start-of-game baseline
+   before the file; setup choices persist in `settings.cfg`; extras (middle-drag look, F11
+   screenshot, macOS pointer capture for alternate control).
+4. The user's own play-through for feel and audio (automated runs are silent and draw
+   almost nothing).
 
 ## Layout
 
@@ -59,7 +63,7 @@ a failed `scBind` unbinds; rooms remember the last node; view switches release `
 CMakeLists.txt          build (targets: lua51, ogg, theoradec, scream)
 src/
   main.cpp              CLI options, boot (scream.sc then game script), --verify-media, --api-status
-  engine.hpp/.cpp       Engine: options, location, camera, input, main loop (scRun), render, cursor, transitions
+  engine.hpp/.cpp       Engine: options, scream.cfg, location, camera, input, main loop (scRun), render, cursor, transitions
   api.cpp               all 87 sc* functions + status table + debug Lua helpers
   world.hpp/.cpp        Room/View(node|zoom)/Object/Item/Dialogue/Choice/Track/Overlay, scCreate/scBind/scBegin/scEnd
   script.hpp/.cpp       Lua host; handlers run as coroutines; wait(predicate) for blocking calls; watchdog
@@ -70,7 +74,7 @@ src/
   audio.* sound.*       stb_vorbis voices on SDL3 streams; game sound model (channels, tracks, playlist)
   video.*               Theora decoder (libtheora) -> RGBA
   ui.cpp menu.cpp       inventory + journal screens; main menu, setup, load/save slots, prefs
-  save.cpp              save/load/new-game state (baseline diff)
+  save.cpp              scream.0NN saved games (DC/2006 layouts); new-game baseline snapshot
   effects.cpp           sky/fog/rain/night/candle/lamp/dream/ambience/screen colour
   check.cpp crawl.cpp explore.cpp   test tools (below)
   constants.hpp         SC_* values (must match scream.sc)

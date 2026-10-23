@@ -30,6 +30,11 @@ struct Camera {
     float yaw = 0;    // degrees, 0 = front, +90 = right
     float pitch = 0;  // degrees, + = up
     float fovY = 53;  // degrees
+    // The 2006 engine projects with the screen's aspect (W / H) into the
+    // narrower view (W x (H - 128)), and draws the faces on a box 4/3 taller
+    // than wide (RATIOX x RATIOY x RATIOX = 30 x 40 x 30). 1 for the DC.
+    float aspectScale = 1;
+    float boxY = 1;
 };
 
 // World-space direction through window pixel (px, py).
@@ -52,7 +57,15 @@ struct RendererTexture {
 
 // How an extra pass over the scene combines with what is already drawn
 // (the blend modes scream.exe's effects use).
-enum class Blend { Opaque, Alpha, AddAlpha, AddOne, DstColor };
+enum class Blend {
+    Opaque, Alpha, AddAlpha, AddOne,
+    DstColor,           // (DST_COLOR, ONE_MINUS_SRC_ALPHA)
+    SrcColorOne,        // (SRC_COLOR, ONE): masks added onto the backdrop
+    DstColorZero,       // (DST_COLOR, ZERO): the node multiplied into it
+    DstColorOne,        // (DST_COLOR, ONE)
+    OneInvSrcAlpha,     // (ONE, ONE_MINUS_SRC_ALPHA)
+    SrcColorDstColor,   // (SRC_COLOR, DST_COLOR)
+};
 
 struct RenderPass {
     float r = 1, g = 1, b = 1, a = 1;
@@ -67,13 +80,26 @@ public:
     using Texture = RendererTexture;
 
     bool init();
+    // scream.cfg QUALITY 0: textures made from now on use nearest filtering.
+    static void setNearest(bool on);
     void beginFrame(int width, int height);
     using Pass = RenderPass;
     void drawNode(const View& node, const Camera& cam, const Viewport& vp, const Pass& pass = {});
-    // Sphere around the viewer (sky, fog, rain backdrops). v runs from the zenith (0)
-    // to the nadir (1); tex = nullptr draws a flat colour.
+    // The node cube with other textures (0x40c1a0): per face (face - 1) a texture
+    // (nullptr: white) and optionally its uv rect (u0, v0, u1, v1; v0 at the top);
+    // faces with a bit set in `skip` are not drawn.
+    using FaceTextures = std::array<const RendererTexture*, 6>;
+    using FaceUv = std::array<std::array<float, 4>, 6>;
+    void drawCube(const Camera& cam, const Viewport& vp, const FaceTextures& faces, const Pass& pass,
+                  const FaceUv* uv = nullptr, unsigned skip = 0);
+    // scream.exe's sky dome (0x418690(150, 5, 5, 12, 4): radius 150, 5 degree
+    // steps, uv tiled 12 x 4), placed as for the clouds and fog (lowered by 100,
+    // pole up) or as one of the two rain hemispheres (pole to either side).
+    enum class DomeFrame { Clouds, RainA, RainB };
     void drawDome(const Camera& cam, const Viewport& vp, const RendererTexture* tex, const Pass& pass,
-                  float uScale, float vScale, float uOffset, float vOffset);
+                  DomeFrame frame, float uvScale, float vOffset, float uOffset = 0);
+    // The 2006 engine's dome: GenerateDome(160, 5, 5, 16, 8) (P 0x406ead).
+    void useDome2006() { buildDome(160, 16, 8); }
     // Extra full-texture pass in canvas coordinates (zoom effects).
     void drawImagePass(const RendererTexture& t, float x, float y, float w, float h, const Pass& pass);
     void drawRectPass(float x, float y, float w, float h, const Pass& pass);
@@ -115,7 +141,7 @@ private:
     gl::GLuint domeVbo_ = 0;
     int domeVertices_ = 0;
     void applyBlend(Blend b);
-    void buildDome();
+    void buildDome(float radius, float hTile, float vTile);
     gl::GLuint white_ = 0;
     std::array<float, 3> tint_{1, 1, 1};
     int width_ = 0, height_ = 0;

@@ -15,9 +15,9 @@
 
 namespace {
 
-constexpr float kVirtual = 800.0f / 1024.0f;  // canvas units per original pixel (1024x768 mode)
-constexpr int kColumns = 10;
-constexpr int kSlots = 70;
+// 10 icons per row in the DC (70 slots), 8 in the 2006 engine (P 0x408fa0).
+int columns(bool release2006) { return release2006 ? 8 : 10; }
+int slotCount(bool release2006) { return release2006 ? 64 : 70; }
 constexpr float kLabelScale = 0.75f;
 constexpr int kJournalPage = 76;  // lines per two-page spread
 
@@ -43,8 +43,9 @@ bool Engine::canOpenInventory() const {
 
 // Opening and closing crossfade like a view switch (0x4174d8, 0x417503).
 void Engine::openInventory() {
-    beginTransition();
+    beginTransition();  // the capture (0x4174e7) is the inventory's backdrop
     invOpen_ = true;
+    invFade_ = 0;
     held = nullptr;
     if (hintsActive())
         feedback(hints[sc::HINTS_OPEN]);
@@ -70,18 +71,20 @@ void Engine::rightClick() {
         openInventory();
 }
 
-Engine::Box Engine::slotBox(int slot) const {
+Engine::Box Engine::slotBox(int slot, bool draw) const {
     double size = 64;
     auto it = settings.find(sc::INV_SIZE);
     if (it != settings.end() && std::holds_alternative<double>(it->second)) size = std::get<double>(it->second);
-    int col = slot % kColumns, row = slot / kColumns;
-    float x = float(32 + col * (32 + size)) * kVirtual;
-    float y = float(64 + row * 96) * kVirtual;  // hit test 0x417c90 (state 0xfa3)
-    return {x, y, float(size) * kVirtual, float(size) * kVirtual};
+    int col = slot % columns(release2006), row = slot / columns(release2006);
+    float x = float(32 + col * (32 + size)) * gMode.px;
+    // Hit rows (0x417c90, state 0xfa3) start at y 64 (2006: 96); the icons are
+    // drawn 2 pixels lower (2006: 8 higher), as compiled.
+    float y = float((release2006 ? 96 : 64) + row * 96 + (draw ? (release2006 ? -8 : 2) : 0)) * gMode.px;
+    return {x, y, float(size) * gMode.px, float(size) * gMode.px};
 }
 
 int Engine::slotAt(float x, float y) const {
-    for (int i = 0; i < int(inventory.size()) && i < kSlots; ++i) {
+    for (int i = 0; i < int(inventory.size()) && i < slotCount(release2006); ++i) {
         Box b = slotBox(i);
         if (x >= b.x && y >= b.y && x < b.x + b.w && y < b.y + b.h)
             return i;
@@ -133,25 +136,29 @@ void Engine::useHeldOn(Object* o) {
         feedback(tool->text, tool->voice);
 }
 
+void Engine::drawInventoryBackdrop() {
+    const Transition& t = transition_;
+    if (t.capture.id)
+        renderer.drawImageUV(t.capture, t.x0, gMode.bar, t.x1 - t.x0, sc::SCREEN_H - 2 * gMode.bar, t.u0, t.v0, t.u1, t.v1,
+                             1 - invFade_, 0.9f, 0.75f, 0.5f);
+}
+
 void Engine::drawInventory() {
-    float mx, my;
-    canvasMouse(mx, my);
-    int hover = slotAt(mx, my);
-    for (int i = 0; i < int(inventory.size()) && i < kSlots; ++i) {
+    for (int i = 0; i < int(inventory.size()) && i < slotCount(release2006); ++i) {
         Item* item = inventory[size_t(i)];
         if (item == held)
             continue;  // it is on the cursor
         if (auto* t = renderer.texture(res, item->icon)) {
-            Box b = slotBox(i);
-            renderer.drawImage(*t, b.x, b.y, b.w, b.h, i == hover ? 1.0f : 0.85f);
+            Box b = slotBox(i, true);
+            renderer.drawImage(*t, b.x, b.y, b.w, b.h, std::min(1.0f, invFade_ * 2));
         }
     }
-    // Label of the item under the cursor, in the bottom bar.
-    if (hover >= 0 && !feedbackShown() && font_.loaded()) {
-        const std::string& label = inventory[size_t(hover)]->label;
-        float w = font_.width(label, kLabelScale);
-        font_.draw(renderer, label, (sc::SCREEN_W - w) / 2, sc::SCREEN_H - 52, kLabelScale);
-    }
+    if (capturing_)
+        return;
+    double speed = 25;
+    if (auto* v = std::get_if<double>(&settings[sc::MOV_SPEED])) speed = *v;
+    if (invFade_ < 0.5f)
+        invFade_ += float(speed * 0.001 * frameDt_ * 60);
 }
 
 // The held item as the cursor (0x40b400, a 64 px quad). With `glow` (cursor
@@ -165,10 +172,10 @@ void Engine::drawHeldCursor(bool glow) {
             x = sc::SCREEN_W / 2.0f;
             y = sc::SCREEN_H / 2.0f;
         }
-        Box b = slotBox(0);
+        const Box b = {0, 0, 64 * gMode.px, 64 * gMode.px};  // a 64 pixel quad, centred
         renderer.drawImage(*t, x - b.w / 2, y - b.h / 2, b.w, b.h);
         for (int i = 0; glow && i < 2; ++i) {
-            const float grow = float(i) * kVirtual;
+            const float grow = float(i) * gMode.px;
             renderer.drawImagePass(*t, x - b.w / 2 - grow, y - b.h / 2 - grow, b.w + 2 * grow, b.h + 2 * grow,
                                    Renderer::Pass{1, 1, 1, 1, Blend::AddAlpha});
         }
@@ -240,7 +247,7 @@ void Engine::journalAdd(int index, const std::string& text) {
 void Engine::journalClick() {
     float x, y;
     canvasMouse(x, y);
-    const float px = kVirtual, ox = x / px, oy = y / px;
+    const float px = gMode.px, ox = x / px, oy = y / px;
     if (oy >= 605) {
         closeJournal();
         return;
@@ -270,10 +277,10 @@ void Engine::drawJournal() {
     if (!book)
         return;
     // Like a zoom image, over the view between the 64 pixel bars (0x4083c0).
-    renderer.drawImage(*book, 0, 64 * kVirtual, sc::SCREEN_W, sc::SCREEN_H - 128 * kVirtual);
+    renderer.drawImage(*book, 0, 64 * gMode.px, sc::SCREEN_W, sc::SCREEN_H - 128 * gMode.px);
     if (!journalFont_.loaded())
         return;
-    const float px = kVirtual;
+    const float px = gMode.px;
     int x = 32, y = 100;
     for (int r = 0, i = journal.first; r < kJournalPage; ++r, ++i) {
         if (i <= journal.last && size_t(i) < journal.lines.size())

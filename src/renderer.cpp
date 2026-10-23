@@ -53,6 +53,18 @@ Mat4 viewMatrix(const Camera& cam) {
     return mul(pitch, yaw);
 }
 
+Mat4 translate(float x, float y, float z) { return {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, y, z, 1}; }
+
+// glRotatef about the x / y axis.
+Mat4 rotateX(float deg) {
+    float c = std::cos(rad(deg)), s = std::sin(rad(deg));
+    return {1, 0, 0, 0, 0, c, s, 0, 0, -s, c, 0, 0, 0, 0, 1};
+}
+Mat4 rotateY(float deg) {
+    float c = std::cos(rad(deg)), s = std::sin(rad(deg));
+    return {c, 0, -s, 0, 0, 1, 0, 0, s, 0, c, 0, 0, 0, 0, 1};
+}
+
 Mat4 ortho(float l, float r, float b, float t) {
     Mat4 m{};
     m[0] = 2 / (r - l);
@@ -106,6 +118,8 @@ gl::GLuint compile(gl::GLenum type, const char* src) {
     return s;
 }
 
+bool gNearest = false;  // scream.cfg QUALITY 0: GL_NEAREST everywhere (0x40bdde)
+
 gl::GLuint uploadTexture(int w, int h, const uint8_t* rgba, bool mipmaps) {
     gl::GLuint id;
     gl::GenTextures(1, &id);
@@ -114,8 +128,10 @@ gl::GLuint uploadTexture(int w, int h, const uint8_t* rgba, bool mipmaps) {
     gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA8, w, h, 0, gl::RGBA, gl::UNSIGNED_BYTE, rgba);
     gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE);
     gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE);
-    gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR);
-    gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, mipmaps ? gl::LINEAR_MIPMAP_LINEAR : gl::LINEAR);
+    if (gNearest) mipmaps = false;
+    gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gNearest ? gl::NEAREST : gl::LINEAR);
+    gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER,
+                      gNearest ? gl::NEAREST : mipmaps ? gl::LINEAR_MIPMAP_LINEAR : gl::LINEAR);
     if (mipmaps)
         gl::GenerateMipmap(gl::TEXTURE_2D);
     return id;
@@ -138,12 +154,13 @@ const FaceBasis& faceBasis(int face) {
 
 Vec3 viewRay(const Camera& cam, float px, float py, int width, int height) {
     float t = std::tan(rad(cam.fovY) / 2);
-    float aspect = float(width) / float(height);
+    float aspect = float(width) / float(height) * cam.aspectScale;
     Vec3 d{(2 * px / width - 1) * t * aspect, (1 - 2 * py / height) * t, -1};
     // Undo the view rotation (inverse = transpose of a rotation).
+    // In box space: picking against the unit cube then finds the point of the stretched face.
     Mat4 v = viewMatrix(cam);
     return {v[0] * d.x + v[1] * d.y + v[2] * d.z,
-            v[4] * d.x + v[5] * d.y + v[6] * d.z,
+            (v[4] * d.x + v[5] * d.y + v[6] * d.z) / cam.boxY,
             v[8] * d.x + v[9] * d.y + v[10] * d.z};
 }
 
@@ -208,7 +225,7 @@ bool Renderer::init() {
 
     const uint8_t white[4] = {255, 255, 255, 255};
     white_ = uploadTexture(1, 1, white, false);
-    buildDome();
+    buildDome(150, 12, 4);
     return true;
 }
 
@@ -231,7 +248,9 @@ void Renderer::beginFrame(int width, int height) {
 
 void Renderer::setViewport3D(const Viewport& vp, const Camera& cam) {
     gl::Viewport(vp.x, height_ - vp.y - vp.h, vp.w, vp.h);
-    Mat4 mvp = mul(perspective(cam.fovY, float(vp.w) / float(vp.h), 0.1f, 10.0f), viewMatrix(cam));
+    // gluPerspective(fov, W / (H - 128), 0.1, 1000) (0x40df60); no depth test.
+    Mat4 box = {1, 0, 0, 0, 0, cam.boxY, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+    Mat4 mvp = mul(mul(perspective(cam.fovY, float(vp.w) / float(vp.h) * cam.aspectScale, 0.1f, 1000.0f), viewMatrix(cam)), box);
     gl::UniformMatrix4fv(uMvp_, 1, 0, mvp.data());
 }
 
@@ -242,6 +261,11 @@ void Renderer::applyBlend(Blend b) {
     case Blend::AddAlpha: gl::BlendFunc(gl::SRC_ALPHA, gl::ONE); break;
     case Blend::AddOne: gl::BlendFunc(gl::ONE, gl::ONE); break;
     case Blend::DstColor: gl::BlendFunc(gl::DST_COLOR, gl::ONE_MINUS_SRC_ALPHA); break;
+    case Blend::SrcColorOne: gl::BlendFunc(gl::SRC_COLOR, gl::ONE); break;
+    case Blend::DstColorZero: gl::BlendFunc(gl::DST_COLOR, gl::ZERO); break;
+    case Blend::DstColorOne: gl::BlendFunc(gl::DST_COLOR, gl::ONE); break;
+    case Blend::OneInvSrcAlpha: gl::BlendFunc(gl::ONE, gl::ONE_MINUS_SRC_ALPHA); break;
+    case Blend::SrcColorDstColor: gl::BlendFunc(gl::SRC_COLOR, gl::DST_COLOR); break;
     }
     gl::Enable(gl::BLEND);
 }
@@ -279,38 +303,72 @@ void Renderer::drawNode(const View& node, const Camera& cam, const Viewport& vp,
     gl::Viewport(0, 0, width_, height_);
 }
 
-void Renderer::buildDome() {
-    // Latitude/longitude sphere; u = longitude, v = 0 at the zenith .. 1 at the nadir.
-    const int lat = 24, lon = 48;
-    std::vector<float> v;
-    auto vert = [&](int i, int j) {
-        float th = kPi * float(i) / lat, ph = 2 * kPi * float(j) / lon;
-        v.insert(v.end(), {std::sin(th) * std::cos(ph), std::cos(th), std::sin(th) * std::sin(ph),
-                           float(j) / lon, float(i) / lat});
+// GenerateDome (0x418690), the classic sky dome: rings every dPhi degrees
+// from the pole down to the rim, four vertices per step, drawn as a single
+// triangle strip (the joins are degenerate). The pole is local +z; u wraps
+// around it hTile times and v follows the local y axis.
+void Renderer::buildDome(float r, float hTile, float vTile) {
+    const float dTheta = 5, dPhi = 5;
+    struct V {
+        float x, y, z, u, v;
     };
-    for (int i = 0; i < lat; ++i)
-        for (int j = 0; j < lon; ++j) {
-            vert(i, j); vert(i + 1, j); vert(i, j + 1);
-            vert(i, j + 1); vert(i + 1, j); vert(i + 1, j + 1);
+    std::vector<V> v;
+    auto vert = [&](float phi, float theta) {
+        V p{r * std::sin(rad(phi)) * std::cos(rad(theta)), r * std::sin(rad(phi)) * std::sin(rad(theta)),
+            r * std::cos(rad(phi)), 0, 0};
+        float len = std::sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
+        float vx = p.x / len, vy = p.y / len, vz = p.z / len;
+        p.u = hTile * float(std::atan2(vx, vz) * (1 / (kPi * 2.0))) + 0.5f;
+        p.v = vTile * float(std::asin(vy) * (1 / double(kPi))) + 0.5f;
+        v.push_back(p);
+    };
+    for (float phi = 0; phi <= 90 - dPhi; phi += dPhi)
+        for (float theta = 0; theta <= 360 - dTheta; theta += dTheta) {
+            vert(phi, theta);
+            vert(phi + dPhi, theta);
+            vert(phi, theta + dTheta);
+            vert(phi + dPhi, theta + dTheta);
         }
-    domeVertices_ = int(v.size() / 5);
-    gl::GenBuffers(1, &domeVbo_);
+    // The seam fix: where a coordinate wraps between neighbours, lift the lower one.
+    for (size_t i = 0; i + 3 < v.size(); ++i) {
+        auto fix = [&](float V::*c, float limit) {
+            const size_t pairs[6][2] = {{i, i + 1}, {i + 1, i}, {i, i + 2}, {i + 2, i}, {i + 1, i + 2}, {i + 2, i + 1}};
+            for (const auto& [a, b] : pairs)
+                if (v[a].*c - v[b].*c > limit) v[b].*c += 1;
+        };
+        fix(&V::u, 0.9f);
+        fix(&V::v, 0.8f);
+    }
+    domeVertices_ = int(v.size());
+    if (!domeVbo_)
+        gl::GenBuffers(1, &domeVbo_);
     gl::BindBuffer(gl::ARRAY_BUFFER, domeVbo_);
-    gl::BufferData(gl::ARRAY_BUFFER, gl::GLsizeiptr(v.size() * sizeof(float)), v.data(), gl::STATIC_DRAW);
+    gl::BufferData(gl::ARRAY_BUFFER, gl::GLsizeiptr(v.size() * sizeof(V)), v.data(), gl::STATIC_DRAW);
     gl::BindBuffer(gl::ARRAY_BUFFER, vbo_);
 }
 
+// scream.exe's world is ours turned half way round (its camera faces +z at
+// the front), so the dome is turned with it.
 void Renderer::drawDome(const Camera& cam, const Viewport& vp, const RendererTexture* tex, const Pass& pass,
-                        float uScale, float vScale, float uOffset, float vOffset) {
-    setViewport3D(vp, cam);
+                        DomeFrame frame, float uvScale, float vOffset, float uOffset) {
+    Mat4 model;
+    switch (frame) {
+    case DomeFrame::Clouds: model = mul(translate(0, -100, 0), rotateX(270)); break;  // 0x40d990
+    case DomeFrame::RainA: model = rotateY(270); break;                               // 0x40dda0
+    case DomeFrame::RainB: model = rotateY(-270); break;
+    }
+    model = mul(rotateY(180), model);
+    gl::Viewport(vp.x, height_ - vp.y - vp.h, vp.w, vp.h);
+    Mat4 mvp = mul(mul(perspective(cam.fovY, float(vp.w) / float(vp.h) * cam.aspectScale, 0.1f, 1000.0f), viewMatrix(cam)), model);
+    gl::UniformMatrix4fv(uMvp_, 1, 0, mvp.data());
     applyBlend(pass.blend);
     gl::BindTexture(gl::TEXTURE_2D, tex ? tex->id : white_);
-    gl::Uniform4f(uTint_, pass.r, pass.g, pass.b, pass.a);
-    gl::Uniform4f(uUvXform_, uScale, vScale, uOffset, vOffset);
+    gl::Uniform4f(uTint_, pass.r * tint_[0], pass.g * tint_[1], pass.b * tint_[2], pass.a);
+    gl::Uniform4f(uUvXform_, uvScale, uvScale, uOffset, vOffset);
     gl::BindBuffer(gl::ARRAY_BUFFER, domeVbo_);
     gl::VertexAttribPointer(0, 3, gl::FLOAT, 0, 5 * sizeof(float), nullptr);
     gl::VertexAttribPointer(1, 2, gl::FLOAT, 0, 5 * sizeof(float), reinterpret_cast<void*>(3 * sizeof(float)));
-    gl::DrawArrays(gl::TRIANGLES, 0, domeVertices_);
+    gl::DrawArrays(gl::TRIANGLE_STRIP, 0, domeVertices_);
     gl::BindBuffer(gl::ARRAY_BUFFER, vbo_);
     gl::VertexAttribPointer(0, 3, gl::FLOAT, 0, 5 * sizeof(float), nullptr);
     gl::VertexAttribPointer(1, 2, gl::FLOAT, 0, 5 * sizeof(float), reinterpret_cast<void*>(3 * sizeof(float)));
@@ -318,9 +376,32 @@ void Renderer::drawDome(const Camera& cam, const Viewport& vp, const RendererTex
     gl::Viewport(0, 0, width_, height_);
 }
 
+void Renderer::drawCube(const Camera& cam, const Viewport& vp, const FaceTextures& faces, const Pass& pass,
+                        const FaceUv* uv, unsigned skip) {
+    setViewport3D(vp, cam);
+    applyBlend(pass.blend);
+    gl::Uniform4f(uTint_, pass.r * tint_[0], pass.g * tint_[1], pass.b * tint_[2], pass.a);
+    for (int f = sc::FRONT; f <= sc::DOWN; ++f) {
+        if (skip & (1u << (f - 1)))
+            continue;
+        const std::array<float, 4> r = uv ? (*uv)[size_t(f - 1)] : std::array<float, 4>{0, 0, 1, 1};
+        const FaceBasis& b = faceBasis(f);
+        auto corner = [&](float u, float v) {
+            Vec3 p = b.center + b.right * (2 * u - 1) + b.down * (2 * v - 1);
+            return std::array<float, 5>{p.x, p.y, p.z, r[0] + (r[2] - r[0]) * u, r[1] + (r[3] - r[1]) * v};
+        };
+        std::array<std::array<float, 5>, 4> q = {corner(0, 0), corner(1, 0), corner(0, 1), corner(1, 1)};
+        gl::BufferData(gl::ARRAY_BUFFER, sizeof q, q.data(), gl::DYNAMIC_DRAW);
+        const RendererTexture* t = faces[size_t(f - 1)];
+        gl::BindTexture(gl::TEXTURE_2D, t && t->id ? t->id : white_);
+        gl::DrawArrays(gl::TRIANGLE_STRIP, 0, 4);
+    }
+    gl::Viewport(0, 0, width_, height_);
+}
+
 void Renderer::drawImagePass(const RendererTexture& t, float x, float y, float w, float h, const Pass& pass) {
     gl::BindTexture(gl::TEXTURE_2D, t.id);
-    gl::Uniform4f(uTint_, pass.r, pass.g, pass.b, pass.a);
+    gl::Uniform4f(uTint_, pass.r * tint_[0], pass.g * tint_[1], pass.b * tint_[2], pass.a);
     quad2D(x, y, w, h, 0, 0, 1, 1, pass.blend);
 }
 
@@ -423,6 +504,8 @@ void Renderer::uploadInto(Texture& t, int w, int h, const uint8_t* rgba) {
     t.width = w;
     t.height = h;
 }
+
+void Renderer::setNearest(bool on) { gNearest = on; }
 
 void Renderer::captureFrame(Texture& t) {
     if (!t.id) {

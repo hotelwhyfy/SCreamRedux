@@ -30,6 +30,22 @@ Room* World::room(const std::string& name) {
     return it == rooms.end() ? nullptr : it->second.get();
 }
 
+// A second scCreate of the same name takes a new index in scream.exe while
+// lookups keep finding the first; here the first is kept and the index used up.
+template <typename T>
+static T* createNamed(std::map<std::string, std::unique_ptr<T>>& m, const std::string& name, std::vector<T*>& list) {
+    auto& slot = m[name];
+    if (!slot) {
+        slot = std::make_unique<T>();
+        slot->name = name;
+        slot->index = int(list.size());
+        list.push_back(slot.get());
+    } else {
+        list.push_back(nullptr);
+    }
+    return slot.get();
+}
+
 template <typename T>
 static T* createNamed(std::map<std::string, std::unique_ptr<T>>& m, const std::string& name) {
     auto& slot = m[name];
@@ -43,7 +59,7 @@ static T* createNamed(std::map<std::string, std::unique_ptr<T>>& m, const std::s
 bool World::create(int kind, const std::string& name) {
     switch (kind) {
     case sc::ROOM:
-        bound.room = createNamed(rooms, name);
+        bound.room = createNamed(rooms, name, roomList);
         bound.node = bound.zoom = bound.view = nullptr;
         bound.object = nullptr;
         return true;
@@ -56,6 +72,9 @@ bool World::create(int kind, const std::string& name) {
         v->name = name;
         v->isZoom = kind == sc::ZOOM;
         View* p = v.get();
+        auto& order = kind == sc::NODE ? nodeList : zoomList;
+        p->index = int(order.size());
+        order.push_back(p);
         list.push_back(std::move(v));
         (kind == sc::NODE ? bound.node : bound.zoom) = p;
         bound.view = p;
@@ -69,14 +88,16 @@ bool World::create(int kind, const std::string& name) {
             return false;
         auto o = std::make_unique<Object>();
         o->name = name;
+        o->index = int(objectList.size());
+        objectList.push_back(o.get());
         bound.object = o.get();
         bound.view->objects.push_back(std::move(o));
         return true;
     }
-    case sc::ITEM: bound.item = createNamed(items, name); return true;
+    case sc::ITEM: bound.item = createNamed(items, name, itemList); return true;
     case sc::SCRIPT: bound.dialogue = createNamed(dialogues, name); return true;
     case sc::CHOICE: bound.choice = createNamed(choices, name); return true;
-    case sc::TRACK: bound.track = createNamed(tracks, name); return true;
+    case sc::TRACK: bound.track = createNamed(tracks, name, trackList); return true;
     case sc::OVERLAY: bound.overlay = createNamed(overlays, name); return true;
     }
     return false;

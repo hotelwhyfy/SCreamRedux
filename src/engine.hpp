@@ -3,10 +3,12 @@
 #include <SDL3/SDL.h>
 
 #include <array>
+#include <deque>
 #include <filesystem>
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <variant>
@@ -21,6 +23,24 @@
 #include "video.hpp"
 #include "world.hpp"
 
+// scream.exe lays out its 2D screens in pixels of the configured mode
+// (scream.cfg WIDTH x HEIGHT; glOrtho(0, W, 0, H)): the DC's cfg asks for
+// 1024x768, the 2006 one for 800x600. We draw that mode onto the 800x600
+// canvas, scaled by px. A mode that isn't 4:3 is laid out as the 4:3 mode of
+// the same height (the 3D view still spans the window).
+struct ScreenMode {
+    int w = 1024, h = 768;
+    float px = 800.0f / 1024.0f;  // canvas units per mode pixel
+    float bar = 50;              // the 64 pixel bars above and below the view
+    void set(int height) {
+        h = height > 0 ? height : 768;
+        w = h * 4 / 3;
+        px = float(sc::SCREEN_H) / float(h);
+        bar = 64 * px;
+    }
+};
+inline ScreenMode gMode;
+
 struct Options {
     std::vector<std::filesystem::path> dataDirs;  // searched in order; later ones win
     std::string start;          // "room" or "room:node": skip the menu and go there
@@ -32,8 +52,8 @@ struct Options {
     float yaw = 0, pitch = 0;
     bool trace = false;         // log every sc* call
     bool hotspots = false;      // SC_SHOW_HOTSPOTS debug overlay
-    bool windowed = true;
-    int windowW = 1024, windowH = 768;  // --window
+    int fullscreen = -1;        // --fullscreen 1 / --windowed 0; -1: from scream.cfg
+    int windowW = 0, windowH = 0;  // --window; 0: scream.cfg WIDTH x HEIGHT
     bool verifyMedia = false;   // decode every asset and exit
     bool check = false;         // validate the built world, then exit (check.cpp)
     bool turbo = false;         // fast-forward for automated runs: no audio or video, fast clock
@@ -136,8 +156,6 @@ public:
     bool cameraMoving() const { return camAnim_.active; }
 
     void feedback(const std::string& text, const std::string& voice = {});
-    // scream.exe's default screen mode; its text layout is in these pixels.
-    static constexpr int kOrigW = 1024, kOrigH = 768;
     bool feedbackShown() const { return feedback_.count > 0; }
     // Start a crossfade from what is on screen now (0x407ad0; 0x407b20 starts at 0.75).
     void beginTransition(float progress = 0, bool unlock = true);
@@ -162,15 +180,25 @@ public:
     void debugMenu(int mode);  // open the menu at once in a mode (0 main, 1 load, 2 save, 4 setup)
     void debugUseHeld(Object* o) { useHeldOn(o); }
     void hotkey(int vk);  // 0x4175b0, keyed by Windows virtual-key codes (also debugKey)
-    void addTimer(double seconds, const std::string& fn, bool global);
+    void addTimer(int id, int seconds, const std::string& fn, bool global);
 
     // Engine flags, as in scream.exe:
     bool locked = false;    // scLock/scUnlock (0x48bc0c): input off, cursor hidden
     bool waitMode = false;  // scWait/scGo (0x48bc10): show the wait cursor while locked
     bool motion = true;     // scMotion/scStill (0x48bc08): camera input allowed
+    int sleeping_ = 0;      // scSleep calls waiting
+    bool sleepSkip_ = false;  // Esc during a DC scSleep
     void abortGame();       // scAbort: wait for input after the ending, then leave
     void leaveAbortedGame();
     bool loadSettings(const std::string& file);  // scLoadSettings / scream.cfg
+    // scream.cfg's keys with scream.exe's defaults (0x40f260).
+    struct Config {
+        std::string script = "main", resource = "game.res", path = ".\\", language = "en";
+        int width = 1024, height = 768, depth = 32, quality = 3, fullscreen = 1, surround = 1, log = 0,
+            vsync = 1, rate = 0, audioDevice = 0, bufferSize = 32768, numBuffers = 4, debug = 0;
+    } config;
+    void applyConfig();
+    void setLogging(bool on);  // SC_LOG: append the log to scream.log
     double now() const { return gameClock_; }  // game time; stops while the menu is open
     double realTime() const;
 
@@ -200,6 +228,12 @@ private:
     std::filesystem::path saveDir() const;
     std::filesystem::path slotPath(int slot) const;
     std::string slotDescription(int slot) const;
+    bool slotUsed(int slot) const;
+    double quickLoadAt_ = -1;  // F7: when the second over the black zoom is up
+    void updateQuickLoad();
+    std::filesystem::path legacySlotPath(int slot) const;
+    bool loadLegacySlot(int slot);
+    std::string saveDescription(int slot);
     bool saveSlot(int slot);
     bool loadSlot(int slot);
     std::string baseline_;  // world + engine state when the game script finished building
@@ -239,7 +273,11 @@ private:
     bool slotExists(int file) const;
     void readMenuSlots();
     std::array<std::string, 11> menuSlots_;  // row texts; row 0 is the quicksave
-    bool slideshow_ = false;  // 0x4df8ddc, the setup menu's slideshow mode (not ported)
+    bool slideshow_ = false;  // 0x4df8ddc, the setup menu's slideshow mode
+    void slideshowStep();
+    void setLook(float yaw, float y);  // 0x407d10, in the original's angles
+    void getLook(float& yaw, float& y) const;  // 0x407d30
+    float pitchLimit() const;
     void drawMenu();
     void drawMenuBackground();
     void loadUserSettings();
@@ -256,7 +294,9 @@ private:
     void openInventory();
     void closeInventory();
     bool hintsActive() const;
-    Box slotBox(int slot) const;
+    Box slotBox(int slot, bool draw = false) const;
+    float invFade_ = 0;  // 0x48baf0 while the inventory is open: 0 .. 0.5
+    void drawInventoryBackdrop();
     int slotAt(float x, float y) const;
     void inventoryClick();
     void useHeldOn(Object* o);
@@ -275,6 +315,10 @@ private:
         int screenPreset = 0;
         bool screenFading = false;
         double cloudScroll = 0, fogScroll = 0, rainScroll = 0;
+        double fogStep = 0;           // the fog's scroll per call (it is called twice per frame)
+        double cloudScroll2006 = 0, fogScroll2006 = 0, fogStep2006 = 0;
+        float gradientSlide = 0;      // 0x48bba4: the horizon gradient's one-off slide
+        bool skyDrawn = false;        // colour fades only run while the sky is drawn
         float cloudA = 1, cloudB = 0, cloudTimer = 0;  // layer A starts visible
         int cloudState = 0;
         double lightningClock = 0, flickerClock = 0;
@@ -285,6 +329,10 @@ private:
     std::array<const RendererTexture*, 6> faceMasks(const View& v);
     void drawNodeScene(const View& v, const Viewport& vp);
     void drawClouds(const Viewport& vp);  // the two crossfading cloud layers (0x40d990)
+    std::optional<Blend> drawBackdrop(const Viewport& vp, bool zoom);
+    std::optional<Blend> drawBackdrop2006(const Viewport& vp, bool zoom);
+    const RendererTexture* clouds2006();
+    const RendererTexture* repeatingTexture(const std::string& name);
     void applyLighting(const std::function<void(float, float, float, float, Blend)>& overlay,
                        const std::function<void(float, float, float, float, Blend)>& wash);
     Object* hovered(int& edge);
@@ -294,7 +342,7 @@ private:
     // offset from the screen centre, the pointer springs back to the centre.
     bool fpsStyle() const;
     bool fpsActive() const;  // in a panorama, where it applies
-    void fpsCamera(double dt);
+    void fpsCamera(double dt, bool recenter = true);
     void recenterPointer(bool now);
     void updateRelativeMouse();
     bool relativeMouse_ = false;
@@ -304,7 +352,7 @@ private:
     // size (the DC update ships 1024x640 replacements for 800x472 originals).
     struct ZoomRect { float x, y, w, h; };
     ZoomRect zoomRect(const View& z);
-    void drawZoomEffects(const RendererTexture& image, const ZoomRect& zr);
+    void drawZoomScene(const View& z, const RendererTexture& image, const ZoomRect& zr);
     static constexpr float kZoomW = 800, kZoomH = 472;
     bool showHotspots() const {
         auto it = settings.find(sc::SHOW_HOTSPOTS);
@@ -319,18 +367,15 @@ private:
     bool aborted_ = false;
     float panRamp_ = 0;  // acceleration of edge panning, 0..1
 
-    struct CamAnim {
-        bool active = false;
-        float fromYaw = 0, toYaw = 0, fromPitch = 0, toPitch = 0;
-        double t0 = 0, duration = 0;
+    struct CamAnim {  // scLookAt(..., SC_SMOOTH), in the original's angles
+        bool active = false, yawDone = false, yDone = false;
+        float yaw = 0, y = 0, toYaw = 0, toY = 0;
     } camAnim_;
+    void stepLook(double dt);
 
-    struct Timer {
-        double at;
-        std::string fn;
-        bool global;
-    };
-    std::vector<Timer> timers_;
+    std::vector<GameTimer> globalTimers_;  // scTimerCreateGlobal (world +0x4787cbc)
+    double timerTick_ = 0;                 // game time of the last one-second timer tick
+    void updateTimers();
 
     // Feedback text, as scream.exe's text setter (0x40e150) and renderer
     // (0x40aca0) keep it: up to four lines (lines[0] is the bottom one), shown
