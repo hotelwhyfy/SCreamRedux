@@ -5,6 +5,7 @@ extracted/
 __pycache__/
 tools/vendor/
 build/
+build-*/
 compile_commands.json
 /*.png
 .cache/

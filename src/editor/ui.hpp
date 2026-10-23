@@ -5,6 +5,7 @@
 
 #include <imgui.h>
 
+#include <functional>
 #include <map>
 #include <string>
 #include <vector>
@@ -43,6 +44,7 @@ struct App {
     std::vector<Problem> problems;
     bool checked = false;
     bool showHotspots = true;
+    bool worldMap = true;  // the map shows the whole game (else the open room)
 
     // Node and zoom editing (views.cpp).
     struct Drag {
@@ -74,14 +76,27 @@ struct App {
     void play();
     std::filesystem::path writeTemp();  // the current text as a script in a temp directory
 
-    // Change element `path` with `fn` and commit; reports a failed commit.
+    // Changes wait until the frame has been drawn: a commit re-parses the
+    // script and rebuilds every element, so nothing drawn may outlive it.
+    // Whatever `fn` needs must be captured by value.
+    std::vector<std::function<void()>> pending;
+    void later(std::function<void()> fn) { pending.push_back(std::move(fn)); }
+    void applyPending();
+    // Change element `path` with `fn`, then commit; reports a failed commit.
     template <class F>
     void edit(const ElementPath& path, F fn) {
-        if (model::Element* e = p.find(path)) {
-            p.touch(path);
-            fn(*e);
+        later([this, path, fn]() mutable {
+            if (model::Element* e = p.find(path)) {
+                p.touch(path);
+                fn(*e);
+                if (!p.commit()) status = "edit failed: " + p.error;
+            }
+        });
+    }
+    void commitLater() {
+        later([this] {
             if (!p.commit()) status = "edit failed: " + p.error;
-        }
+        });
     }
 };
 

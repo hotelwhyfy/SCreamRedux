@@ -79,6 +79,15 @@ void pushInput(SDL_Window* window, const InputStep& st, float& mx, float& my) {
         e.wheel.windowID = wid;
         e.wheel.y = arg(0, 1);
         e.wheel.mouse_x = mx, e.wheel.mouse_y = my;
+    } else if (st.action == "text" && !st.args.empty()) {  // typed text; _ is a space
+        static std::vector<std::string> keep;  // the event points at it until ImGui reads it
+        std::string t = st.args[0];
+        for (char& c : t)
+            if (c == '_') c = ' ';
+        keep.push_back(t);
+        e.type = SDL_EVENT_TEXT_INPUT;
+        e.text.windowID = wid;
+        e.text.text = keep.back().c_str();
     } else if (st.action == "key" && !st.args.empty()) {
         std::string k = st.args[0];
         SDL_Keymod mod = 0;
@@ -178,6 +187,15 @@ bool App::jumpTo(const std::string& whereIn) {
             }
     status = "can't find " + whereIn;
     return false;
+}
+
+void App::applyPending() {
+    // An edit may queue another (none do now); run until the queue is empty.
+    while (!pending.empty()) {
+        auto batch = std::move(pending);
+        pending.clear();
+        for (auto& fn : batch) fn();
+    }
 }
 
 const RendererTexture* App::texture(const std::string& name) { return renderer.texture(p.res, name); }
@@ -319,6 +337,7 @@ int runApp(const AppOptions& opts) {
 
     if (!opts.open.empty()) a.jumpTo(opts.open);
     if (opts.center == "map") a.center = App::Center::Map;
+    else if (opts.center == "roommap") a.center = App::Center::Map, a.worldMap = false;
     else if (opts.center.rfind("code:", 0) == 0) a.center = App::Center::Handler, a.handler = opts.center.substr(5);
     else if (opts.center.rfind("asset:", 0) == 0) a.center = App::Center::Asset, a.asset = opts.center.substr(6);
     if (opts.yaw) a.cam.yaw = opts.yaw;
@@ -346,10 +365,10 @@ int runApp(const AppOptions& opts) {
         if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_S, ImGuiInputFlags_RouteGlobal))
             a.status = a.p.save() ? "saved " + a.p.scriptPath.string() : a.p.error;
         if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Z, ImGuiInputFlags_RouteGlobal) && !ImGui::GetIO().WantTextInput)
-            a.p.undo();
+            a.later([&a] { a.p.undo(); });
         if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Z, ImGuiInputFlags_RouteGlobal) &&
             !ImGui::GetIO().WantTextInput)
-            a.p.redo();
+            a.later([&a] { a.p.redo(); });
         if (ImGui::IsKeyPressed(ImGuiKey_F5)) a.play();
         if (ImGui::IsKeyPressed(ImGuiKey_F6)) a.runCheck();
 
@@ -368,8 +387,8 @@ int runApp(const AppOptions& opts) {
                 ImGui::EndMenu();
             }
             if (ImGui::BeginMenu("Edit")) {
-                if (ImGui::MenuItem("Undo", "Ctrl+Z", false, a.p.canUndo())) a.p.undo();
-                if (ImGui::MenuItem("Redo", "Ctrl+Shift+Z", false, a.p.canRedo())) a.p.redo();
+                if (ImGui::MenuItem("Undo", "Ctrl+Z", false, a.p.canUndo())) a.later([&a] { a.p.undo(); });
+                if (ImGui::MenuItem("Redo", "Ctrl+Shift+Z", false, a.p.canRedo())) a.later([&a] { a.p.redo(); });
                 ImGui::EndMenu();
             }
             if (ImGui::BeginMenu("Run")) {
@@ -385,14 +404,15 @@ int runApp(const AppOptions& opts) {
                 ImGui::InputText("folder", dir, sizeof dir);
                 ImGui::InputText("title", title, sizeof title);
                 if (ImGui::Button("Create")) {
-                    std::string error;
-                    std::filesystem::path d = dir;
-                    if (createProject(d, title, error) && a.p.load(d / "game.lua", {d})) {
-                        a.select({}), a.jumpTo("studio");
-                        a.status = "made " + d.string();
-                    } else {
-                        a.status = error.empty() ? a.p.error : error;
-                    }
+                    a.later([&a, d = std::filesystem::path(dir), t = std::string(title)] {
+                        std::string error;
+                        if (createProject(d, t, error) && a.p.load(d / "game.lua", {d})) {
+                            a.select({}), a.jumpTo("studio");
+                            a.status = "made " + d.string();
+                        } else {
+                            a.status = error.empty() ? a.p.error : error;
+                        }
+                    });
                     ImGui::CloseCurrentPopup();
                 }
                 ImGui::SameLine();
@@ -446,6 +466,7 @@ int runApp(const AppOptions& opts) {
             running = false;
         }
         SDL_GL_SwapWindow(window);
+        a.applyPending();
     }
 
     ImGui_ImplOpenGL3_Shutdown();

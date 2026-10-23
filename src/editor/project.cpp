@@ -73,6 +73,7 @@ bool Project::parse(const std::string& text) {
     }
     doc = std::move(d);
     text_ = text;
+    ++version;
     error.clear();
     builders.clear();
     for (const auto& it : doc.items)
@@ -176,6 +177,30 @@ bool Project::insertBeforeBoot(const std::string& text) {
     for (const auto& it : d.items)
         if (it.kind == doc::Item::Kind::Function) at = it.end;
     return setText(all.substr(0, at) + "\n\n" + text + all.substr(at));
+}
+
+bool Project::addText(const std::string& name, const std::string& text) {
+    std::string all = model::writeDocument(doc, builders);
+    doc::Document d;
+    if (!d.parse(all)) return false;
+    size_t at = 0;
+    for (const auto& it : d.items)
+        if (it.kind == doc::Item::Kind::Assign && it.text) at = it.end;
+    std::string line = name + " = " + doc::quote(text);
+    if (!at) return setText(line + "\n\n" + all);  // no text table yet: start one at the top
+    return setText(all.substr(0, at) + "\n" + line + all.substr(at));
+}
+
+std::string Project::nextTextName() const {
+    int best = 0;
+    size_t width = 4;
+    for (const auto& [name, _] : texts)
+        if (name.size() > 3 && name.compare(0, 3, "msg") == 0 && name.find_first_not_of("0123456789", 3) == std::string::npos) {
+            best = std::max(best, std::stoi(name.substr(3)));
+            width = std::max(width, name.size() - 3);
+        }
+    std::string n = std::to_string(best + 1);
+    return "msg" + std::string(width > n.size() ? width - n.size() : 0, '0') + n;
 }
 
 bool Project::insertBootCall(const std::string& statement) {

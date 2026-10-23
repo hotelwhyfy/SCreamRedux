@@ -35,6 +35,7 @@ public:
     doc::Document doc;
     std::vector<model::Builder> builders;
     std::string error;
+    int version = 0;  // counts parses, for caches of what the text says
     Resources res;
 
     // The index, rebuilt by every commit.
@@ -60,6 +61,10 @@ public:
     bool replaceItem(const std::string& name, doc::Item::Kind kind, const std::string& text);
     // Append source at the end of the item list (before the boot code) and commit.
     bool insertBeforeBoot(const std::string& text);
+    // Add a global to the text table (after its last entry, as the scripts keep it at the top).
+    bool addText(const std::string& name, const std::string& text);
+    // A free name for a new text global, after the highest msgNNNN.
+    std::string nextTextName() const;
     // Add a statement to the boot code, before scRun() (new builders must be called there).
     bool insertBootCall(const std::string& statement);
 

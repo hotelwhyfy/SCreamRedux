@@ -207,11 +207,21 @@ developers' own layout, and every other line of the file stays as it was.
   to look around, drag a hotspot to move or resize it, and use *New hotspot*
   to draw one (coordinates snap to the developers' 5-unit grid).
   Double-click a hotspot to follow it.
-- **Zoom view, Map:** close-ups with their hotspots, and a room's nodes and
-  zooms laid out by what leads where. Nodes that no hotspot reaches are shown in red.
+- **Zoom view:** close-ups with their hotspots, edited the same way.
+- **Map:** the whole game, or one room. The original has no map of its own:
+  each room is a separate set of nodes, and most doors are hotspots whose
+  handler plays the door and calls `scSwitch(SC_ROOM, ...)`. So the game map
+  follows those handlers (and plain `SC_ROOM` clicks) from the room a new
+  game starts in. The room map lays out nodes and zooms by which hotspot
+  leads where. Red marks a place no hotspot leads to.
 - **Inspector:** every call that configures the selected element, with
   pickers for cursors, click actions, target nodes, zooms, rooms and
   handlers, and for item reactions. Drop an asset from the Assets tab onto a field.
+- **Text:** type a hotspot's feedback, an item's label or a dialogue line
+  as plain text. *to text table* moves it into the table of text globals at
+  the top of the script, as the original keeps its text. *pick text* reuses
+  an entry, and the Text tab adds and edits entries (a shared entry changes
+  everywhere it's used).
 - **Outline:** rooms, items, dialogue, choices, music, the text table,
   the code (each handler in an editor, with what uses it) and every asset.
 - **Run:** *Check* (F6) runs the engine's `--check` on the script as it is

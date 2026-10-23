@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <regex>
+#include <set>
 
 #include "ui.hpp"
 
@@ -130,7 +132,7 @@ void addObject(App& a, const std::string& face, const Rect& r) {
     if (!v) return;
     ElementPath path = a.view;
     path.index.push_back(int(v->children.size()));
-    a.edit(a.view, [&](model::Element& view) { view.children.push_back(newObject(face, r)); });
+    a.edit(a.view, [o = newObject(face, r)](model::Element& view) { view.children.push_back(o); });
     a.object = path;
 }
 
@@ -242,7 +244,7 @@ Viewport nodeView(App& a, model::Element& node) {
     }
     if (ImGui::IsItemDeactivated()) {
         if (d.mode == App::Drag::Mode::Move || d.mode == App::Drag::Mode::Resize) {
-            if (!a.p.commit()) a.status = "edit failed: " + a.p.error;
+            a.commitLater();
         } else if (d.mode == App::Drag::Mode::Create && onPlane) {
             Rect r = normalized(d.startX, d.startY, fx, fy);
             if (r.w >= kSnap && r.h >= kSnap) addObject(a, kFaces[d.face - 1], r);
@@ -362,7 +364,7 @@ void zoomView(App& a, model::Element& zoom) {
         if (model::Element* o = a.objectEl()) setRect(*o, dragged(d.startRect, d.edges, zx - d.startX, zy - d.startY));
     if (ImGui::IsItemDeactivated()) {
         if (d.mode == App::Drag::Mode::Move || d.mode == App::Drag::Mode::Resize) {
-            if (!a.p.commit()) a.status = "edit failed: " + a.p.error;
+            a.commitLater();
         } else if (d.mode == App::Drag::Mode::Create) {
             Rect r = normalized(d.startX, d.startY, zx, zy);
             if (r.w >= kSnap && r.h >= kSnap) addObject(a, "SC_ZOOM", r);
@@ -440,36 +442,235 @@ Viewport drawView(App& a) {
     return vp;
 }
 
-// The room's nodes and zooms as a graph of what leads where.
-void drawMap(App& a) {
-    ImGui::Begin("Map###view", nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
-                                            ImGuiWindowFlags_HorizontalScrollbar);
-    model::Element* room = a.roomEl();
-    if (!room) {
-        ImGui::TextDisabled("Open a room from the outline.");
-        ImGui::End();
-        return;
+namespace {
+
+// A graph laid out in columns: each column one step further from the roots
+// (over links between main boxes); a child box (a zoom) sits indented under
+// the box that opens it. Boxes the roots don't reach come last.
+struct GraphBox {
+    std::string name;
+    bool child = false;
+    ImU32 fill = IM_COL32(30, 70, 45, 255);
+    bool reached = true;  // set by layoutGraph for main boxes
+    ImVec2 b0, b1;        // set by layoutGraph
+};
+struct GraphLink {
+    size_t from, to;
+};
+
+ImVec2 layoutGraph(std::vector<GraphBox>& boxes, const std::vector<GraphLink>& links, const std::vector<size_t>& roots,
+                   ImVec2 origin) {
+    std::vector<int> depth(boxes.size(), -1), parent(boxes.size(), -1);
+    std::vector<size_t> queue;
+    for (size_t r : roots)
+        if (r < boxes.size() && depth[r] < 0) depth[r] = 0, queue.push_back(r);
+    int maxDepth = 0;
+    for (size_t q = 0; q < queue.size(); ++q)
+        for (auto& l : links)
+            if (l.from == queue[q] && !boxes[l.to].child && depth[l.to] < 0) {
+                depth[l.to] = depth[queue[q]] + 1;
+                maxDepth = std::max(maxDepth, depth[l.to]);
+                queue.push_back(l.to);
+            }
+    bool unreached = false;
+    for (size_t i = 0; i < boxes.size(); ++i) {
+        boxes[i].reached = boxes[i].child || depth[i] >= 0;
+        if (!boxes[i].child && depth[i] < 0) depth[i] = maxDepth + 1, unreached = true;
     }
-    struct Box {
-        std::string name;
-        bool zoom;
-        size_t index;
+    for (auto& l : links)
+        if (boxes[l.to].child && parent[l.to] < 0 && l.from != l.to) parent[l.to] = int(l.from);
+    const int lastCol = maxDepth + (unreached ? 2 : 1);
+    std::vector<std::vector<std::pair<size_t, int>>> cols(size_t(lastCol) + 1);  // box, indent
+    std::vector<bool> placed(boxes.size(), false);
+    auto group = [&](auto& self, size_t b, int indent, std::vector<std::pair<size_t, int>>& out) -> void {
+        if (placed[b]) return;
+        placed[b] = true;
+        out.push_back({b, indent});
+        for (size_t z = 0; z < boxes.size(); ++z)
+            if (boxes[z].child && parent[z] == int(b)) self(self, z, indent + 1, out);
     };
-    std::vector<Box> boxes;
+    for (int d = 0; d < lastCol; ++d)
+        for (size_t i = 0; i < boxes.size(); ++i)
+            if (!boxes[i].child && depth[i] == d) group(group, i, 0, cols[size_t(d)]);
+    for (size_t i = 0; i < boxes.size(); ++i)
+        if (!placed[i]) group(group, i, 0, cols[size_t(lastCol)]);
+    const float rowH = ImGui::GetTextLineHeight() + 12, indentW = 18, gapX = 56;
+    float x = origin.x + 8, bottom = origin.y;
+    for (auto& col : cols) {
+        if (col.empty()) continue;
+        float y = origin.y + 8, colW = 0;
+        for (auto& [b, indent] : col) {
+            ImVec2 ts = ImGui::CalcTextSize(boxes[b].name.c_str());
+            boxes[b].b0 = {x + indent * indentW, y};
+            boxes[b].b1 = {boxes[b].b0.x + ts.x + 12, y + ts.y + 6};
+            colW = std::max(colW, boxes[b].b1.x - x);
+            y += rowH;
+        }
+        bottom = std::max(bottom, y);
+        x += colW + gapX;
+    }
+    return {x - origin.x, bottom - origin.y + 8};
+}
+
+// Draws the laid-out graph; returns the box clicked (double: double-clicked), or -1.
+int drawGraph(const std::vector<GraphBox>& boxes, const std::vector<GraphLink>& links, int selected,
+              const std::vector<std::string>& tips, bool& doubleClicked) {
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    for (auto& l : links) {
+        const GraphBox &f = boxes[l.from], &t = boxes[l.to];
+        ImU32 col = t.child ? IM_COL32(200, 120, 255, 110) : IM_COL32(80, 220, 120, 150);
+        if (l.from == l.to) continue;
+        if (t.child && t.b0.x > f.b0.x && t.b0.y > f.b0.y && t.b0.x - f.b0.x < 200) {  // under its parent
+            ImVec2 p0{f.b0.x + 6, f.b1.y}, p1{t.b0.x, (t.b0.y + t.b1.y) / 2};
+            dl->AddLine(p0, {p0.x, p1.y}, col, 1.2f);
+            dl->AddLine({p0.x, p1.y}, p1, col, 1.2f);
+            continue;
+        }
+        bool forward = t.b0.x > f.b1.x;
+        ImVec2 p0{forward ? f.b1.x : f.b0.x, (f.b0.y + f.b1.y) / 2};
+        ImVec2 p1{forward ? t.b0.x : t.b1.x, (t.b0.y + t.b1.y) / 2};
+        float bend = std::max(30.0f, std::fabs(p1.x - p0.x) * 0.4f) * (forward ? 1 : -1);
+        if (!forward && std::fabs(p0.x - p1.x) < 1) p0.x = f.b1.x, p1.x = t.b1.x, bend = -40;
+        dl->AddBezierCubic(p0, {p0.x + bend, p0.y}, {p1.x - bend, p1.y}, p1, col, 1.3f);
+        dl->AddCircleFilled(p1, 2.5f, col);
+    }
+    int clicked = -1;
+    doubleClicked = false;
+    for (size_t i = 0; i < boxes.size(); ++i) {
+        const GraphBox& b = boxes[i];
+        bool open = int(i) == selected;
+        float round = b.child ? 0.0f : 6.0f;
+        dl->AddRectFilled(b.b0, b.b1, b.fill, round);
+        dl->AddRect(b.b0, b.b1, open ? IM_COL32(255, 230, 80, 255) : b.reached ? IM_COL32(200, 200, 200, 255) : IM_COL32(255, 80, 80, 255),
+                    round, 0, open ? 2.5f : 1);
+        dl->AddText({b.b0.x + 6, b.b0.y + 3}, IM_COL32_WHITE, b.name.c_str());
+        ImGui::SetCursorScreenPos(b.b0);
+        ImGui::PushID(int(i));
+        if (ImGui::InvisibleButton("box", {b.b1.x - b.b0.x, b.b1.y - b.b0.y})) clicked = int(i);
+        if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) clicked = int(i), doubleClicked = true;
+        if (ImGui::IsItemHovered() && i < tips.size() && !tips[i].empty()) ImGui::SetTooltip("%s", tips[i].c_str());
+        ImGui::PopID();
+    }
+    return clicked;
+}
+
+// The rooms a handler switches to: its own scSwitch(SC_ROOM, "...") calls and
+// those of the handlers it calls (one level: door handlers are short).
+const std::map<std::string, std::vector<std::string>>& roomSwitches(App& a) {
+    static int version = -1;
+    static std::map<std::string, std::vector<std::string>> out;
+    if (version == a.p.version) return out;
+    version = a.p.version;
+    out.clear();
+    static const std::regex sw(R"re(scSwitch\(\s*SC_ROOM\s*,\s*"([^"]+)")re"), call(R"(\b([A-Za-z_]\w*)\s*\()");
+    std::map<std::string, std::vector<std::string>> direct, calls;
+    for (const auto& it : a.p.doc.items) {
+        if (it.kind != doc::Item::Kind::Function || it.builder) continue;
+        std::string src = a.p.doc.text(it.begin, it.end);
+        for (std::sregex_iterator m(src.begin(), src.end(), sw), e; m != e; ++m) direct[it.name].push_back((*m)[1]);
+        for (std::sregex_iterator m(src.begin(), src.end(), call), e; m != e; ++m)
+            if ((*m)[1] != it.name) calls[it.name].push_back((*m)[1]);
+    }
+    for (const auto& h : a.p.handlers) {
+        auto& v = out[h];
+        if (auto d = direct.find(h); d != direct.end()) v = d->second;
+        if (auto c = calls.find(h); c != calls.end())
+            for (const auto& callee : c->second)
+                if (auto d = direct.find(callee); d != direct.end()) v.insert(v.end(), d->second.begin(), d->second.end());
+        std::sort(v.begin(), v.end());
+        v.erase(std::unique(v.begin(), v.end()), v.end());
+    }
+    return out;
+}
+
+// The whole game: rooms, linked by hotspots that change room (SC_ROOM, or a
+// handler that calls scSwitch(SC_ROOM)), from the room the new-game handlers enter.
+void worldMap(App& a) {
+    const auto& sw = roomSwitches(a);
+    std::vector<GraphBox> boxes;
+    std::map<std::string, size_t> index;
+    for (auto& r : a.p.rooms) {
+        index[r.e->name()] = boxes.size();
+        boxes.emplace_back().name = r.e->name();
+    }
+    std::vector<GraphLink> links;
+    std::vector<std::string> tips(boxes.size());
+    std::set<std::pair<size_t, size_t>> seen;
+    auto link = [&](size_t from, const std::string& to, const std::string& how) {
+        auto t = index.find(to);
+        if (t == index.end()) return;
+        tips[from] += "\n" + how + " -> " + to;
+        if (t->second != from && seen.insert({from, t->second}).second) links.push_back({from, t->second});
+    };
+    auto action = [&](size_t from, const std::string& where, const doc::Call& c, size_t k) {
+        if (c.args.size() < k + 2) return;
+        std::string kind = c.args[k].src, target = a.p.resolve(c.args[k + 1]);
+        if (kind == "SC_ROOM") link(from, target, where);
+        if (kind == "SC_CUSTOM")
+            if (auto s = sw.find(target); s != sw.end())
+                for (const auto& room : s->second) link(from, room, where + " (" + target + ")");
+    };
+    for (size_t ri = 0; ri < a.p.rooms.size(); ++ri) {
+        model::Element& room = *a.p.rooms[ri].e;
+        tips[ri] = "room " + room.name() + ", built by " + a.p.rooms[ri].path.builder + "()";
+        for (auto& v : room.children) {
+            if (v.kind() != "SC_NODE" && v.kind() != "SC_ZOOM") continue;
+            for (auto& o : v.children) {
+                if (o.kind() != "SC_OBJECT") continue;
+                std::string where = v.name() + "/" + o.name();
+                if (auto* c = o.find("scOnClick")) action(ri, where, *c, 0);
+                for (auto* r : o.findAll("scReaction")) action(ri, where + " <- " + a.p.resolve(r->args[0]), *r, 1);
+            }
+        }
+    }
+    // Where a new game starts: the rooms the menu's new-game handlers switch to.
+    std::vector<size_t> roots;
+    for (const auto& it : a.p.doc.items)
+        if (it.kind == doc::Item::Kind::Call && it.call && it.call->fn == "scMenuSet")
+            for (size_t k = 7; k < it.call->args.size(); ++k)
+                if (auto s = sw.find(a.p.resolve(it.call->args[k])); s != sw.end())
+                    for (const auto& room : s->second)
+                        if (auto i = index.find(room); i != index.end()) roots.push_back(i->second);
+    if (roots.empty() && !boxes.empty()) roots.push_back(0);
+    ImGui::TextDisabled("columns: steps from where a new game starts (%s)   double-click: open the room   red: no "
+                        "hotspot leads there (a handler, a cutscene or another game may)",
+                        roots.empty() ? "-" : boxes[roots[0]].name.c_str());
+    ImVec2 r0 = ImGui::GetCursorScreenPos();
+    ImVec2 extent = layoutGraph(boxes, links, roots, r0);
+    int selected = -1;
+    for (size_t i = 0; i < a.p.rooms.size(); ++i)
+        if (a.p.rooms[i].path == a.room) selected = int(i);
+    bool dbl;
+    int hit = drawGraph(boxes, links, selected, tips, dbl);
+    if (hit >= 0) {
+        a.select(a.p.rooms[size_t(hit)].path);
+        if (dbl) a.worldMap = false;
+    }
+    ImGui::SetCursorScreenPos(r0);
+    ImGui::Dummy(extent);
+}
+
+// One room: its nodes and zooms by what leads where.
+void roomMap(App& a, model::Element& room) {
+    std::vector<GraphBox> boxes;
+    std::vector<size_t> child;  // room->children index of each box
     std::map<std::string, size_t> byName;
-    for (size_t i = 0; i < room->children.size(); ++i) {
-        auto& c = room->children[i];
+    for (size_t i = 0; i < room.children.size(); ++i) {
+        auto& c = room.children[i];
         if (c.kind() != "SC_NODE" && c.kind() != "SC_ZOOM") continue;
+        bool zoom = c.kind() == "SC_ZOOM";
         byName[c.kind() + c.name()] = boxes.size();
-        boxes.push_back({c.name(), c.kind() == "SC_ZOOM", i});
+        GraphBox& box = boxes.emplace_back();
+        box.name = c.name();
+        box.child = zoom;
+        if (zoom) box.fill = IM_COL32(70, 40, 90, 255);
+        child.push_back(i);
     }
-    struct Link {
-        size_t from, to;
-    };
-    std::vector<Link> links;
-    std::vector<std::string> exits;
+    std::vector<GraphLink> links;
+    std::vector<std::string> exits, tips(boxes.size());
     for (size_t b = 0; b < boxes.size(); ++b) {
-        for (auto& o : room->children[boxes[b].index].children) {
+        tips[b] = std::string(boxes[b].child ? "zoom " : "node ") + boxes[b].name;
+        for (auto& o : room.children[child[b]].children) {
             if (o.kind() != "SC_OBJECT") continue;
             auto* c = o.find("scOnClick");
             if (!c || c->args.size() < 2) continue;
@@ -479,110 +680,49 @@ void drawMap(App& a) {
             if (k == "SC_ROOM") exits.push_back(boxes[b].name + " -> " + t);
         }
     }
-    // Columns by distance from the room's first node over node-to-node links;
-    // each zoom sits indented under the view that opens it. Nodes no hotspot
-    // leads to, and zooms nothing here opens (handlers can, with scSwitch),
-    // get columns of their own at the end.
-    std::vector<int> depth(boxes.size(), -1), parent(boxes.size(), -1);
-    int maxDepth = 0;
+    std::vector<size_t> roots;
     for (size_t i = 0; i < boxes.size(); ++i)
-        if (!boxes[i].zoom) {
-            std::vector<size_t> queue{i};
-            depth[i] = 0;
-            for (size_t q = 0; q < queue.size(); ++q)
-                for (auto& l : links)
-                    if (l.from == queue[q] && !boxes[l.to].zoom && depth[l.to] < 0) {
-                        depth[l.to] = depth[queue[q]] + 1;
-                        maxDepth = std::max(maxDepth, depth[l.to]);
-                        queue.push_back(l.to);
-                    }
+        if (!boxes[i].child) {
+            roots.push_back(i);
             break;
         }
-    std::vector<bool> reach(boxes.size());
-    bool unreached = false;
-    for (size_t i = 0; i < boxes.size(); ++i) {
-        reach[i] = boxes[i].zoom || depth[i] >= 0;
-        if (!boxes[i].zoom && depth[i] < 0) depth[i] = maxDepth + 1, unreached = true;
-    }
-    for (auto& l : links)
-        if (boxes[l.to].zoom && parent[l.to] < 0) parent[l.to] = int(l.from);
-    const int lastCol = maxDepth + (unreached ? 2 : 1);
-    std::vector<std::vector<std::pair<size_t, int>>> cols(size_t(lastCol) + 1);  // box, indent
-    std::vector<bool> placed(boxes.size(), false);
-    auto group = [&](auto& self, size_t b, int indent, std::vector<std::pair<size_t, int>>& out) -> void {
-        if (placed[b]) return;
-        placed[b] = true;
-        out.push_back({b, indent});
-        for (size_t z = 0; z < boxes.size(); ++z)
-            if (boxes[z].zoom && parent[z] == int(b)) self(self, z, indent + 1, out);
-    };
-    for (int d = 0; d < lastCol; ++d)
-        for (size_t i = 0; i < boxes.size(); ++i)
-            if (!boxes[i].zoom && depth[i] == d) group(group, i, 0, cols[size_t(d)]);
-    for (size_t i = 0; i < boxes.size(); ++i)
-        if (!placed[i]) group(group, i, 0, cols[size_t(lastCol)]);
-
     ImGui::TextDisabled("columns: steps from %s   green: nodes   purple: zooms   red: a node no hotspot leads to",
-                        boxes.empty() ? "-" : boxes[0].name.c_str());
+                        roots.empty() ? "-" : boxes[roots[0]].name.c_str());
     for (auto& e : exits) ImGui::TextDisabled("exit %s", e.c_str());
     ImVec2 r0 = ImGui::GetCursorScreenPos();
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    const float rowH = ImGui::GetTextLineHeight() + 12, indentW = 18, gapX = 56;
-    std::vector<ImVec2> b0(boxes.size()), b1(boxes.size());
-    float x = r0.x + 8, bottom = r0.y;
-    for (auto& col : cols) {
-        if (col.empty()) continue;
-        float y = r0.y + 8, colW = 0;
-        for (auto& [b, indent] : col) {
-            ImVec2 ts = ImGui::CalcTextSize(boxes[b].name.c_str());
-            b0[b] = {x + indent * indentW, y};
-            b1[b] = {b0[b].x + ts.x + 12, y + ts.y + 6};
-            colW = std::max(colW, b1[b].x - x);
-            y += rowH;
-        }
-        bottom = std::max(bottom, y);
-        x += colW + gapX;
-    }
-    // Links: node to node as curves between columns, view to zoom as a bracket.
-    for (auto& l : links) {
-        bool zoom = boxes[l.to].zoom;
-        ImU32 col = zoom ? IM_COL32(200, 120, 255, 110) : IM_COL32(80, 220, 120, 150);
-        if (zoom && parent[l.to] == int(l.from)) {
-            ImVec2 p0{b0[l.from].x + 6, b1[l.from].y}, p1{b0[l.to].x, (b0[l.to].y + b1[l.to].y) / 2};
-            dl->AddLine(p0, {p0.x, p1.y}, col, 1.2f);
-            dl->AddLine({p0.x, p1.y}, p1, col, 1.2f);
-            continue;
-        }
-        bool forward = b0[l.to].x > b1[l.from].x;
-        ImVec2 p0{forward ? b1[l.from].x : b0[l.from].x, (b0[l.from].y + b1[l.from].y) / 2};
-        ImVec2 p1{forward ? b0[l.to].x : b1[l.to].x, (b0[l.to].y + b1[l.to].y) / 2};
-        float bend = std::max(30.0f, std::fabs(p1.x - p0.x) * 0.4f) * (forward ? 1 : -1);
-        if (!forward && std::fabs(p1.x - p0.x) < 1) p0.x = b1[l.from].x, p1.x = b1[l.to].x, bend = -40;
-        dl->AddBezierCubic(p0, {p0.x + bend, p0.y}, {p1.x - bend, p1.y}, p1, col, 1.3f);
-        dl->AddCircleFilled(p1, 2.5f, col);
-    }
+    ImVec2 extent = layoutGraph(boxes, links, roots, r0);
+    for (size_t i = 0; i < boxes.size(); ++i)
+        if (!boxes[i].reached) tips[i] += "\nno hotspot in this room leads here (a handler may)";
+    int selected = -1;
     for (size_t i = 0; i < boxes.size(); ++i) {
         ElementPath vp = a.room;
-        vp.index.push_back(int(boxes[i].index));
-        bool open = vp == a.view;
-        float round = boxes[i].zoom ? 0.0f : 6.0f;
-        dl->AddRectFilled(b0[i], b1[i], boxes[i].zoom ? IM_COL32(70, 40, 90, 255) : IM_COL32(30, 70, 45, 255), round);
-        dl->AddRect(b0[i], b1[i], open ? IM_COL32(255, 230, 80, 255) : reach[i] ? IM_COL32(200, 200, 200, 255) : IM_COL32(255, 80, 80, 255),
-                    round, 0, open ? 2.5f : 1);
-        dl->AddText({b0[i].x + 6, b0[i].y + 3}, IM_COL32_WHITE, boxes[i].name.c_str());
-        ImGui::SetCursorScreenPos(b0[i]);
-        ImGui::PushID(int(i));
-        if (ImGui::InvisibleButton("box", {b1[i].x - b0[i].x, b1[i].y - b0[i].y})) {
-            a.select(a.room, vp);
-            a.center = App::Center::View;
-        }
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("%s %s%s", boxes[i].zoom ? "zoom" : "node", boxes[i].name.c_str(),
-                              reach[i] ? "" : "\nno hotspot in this room leads here (a handler may)");
-        ImGui::PopID();
+        vp.index.push_back(int(child[i]));
+        if (vp == a.view) selected = int(i);
+    }
+    bool dbl;
+    int hit = drawGraph(boxes, links, selected, tips, dbl);
+    if (hit >= 0) {
+        ElementPath vp = a.room;
+        vp.index.push_back(int(child[size_t(hit)]));
+        a.select(a.room, vp);
+        a.center = App::Center::View;
     }
     ImGui::SetCursorScreenPos(r0);
-    ImGui::Dummy({x - r0.x, bottom - r0.y + 8});  // the scrollable extent
+    ImGui::Dummy(extent);
+}
+
+}  // namespace
+
+void drawMap(App& a) {
+    ImGui::Begin("Map###view", nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
+                                            ImGuiWindowFlags_HorizontalScrollbar);
+    model::Element* room = a.roomEl();
+    if (ImGui::RadioButton("whole game", a.worldMap)) a.worldMap = true;
+    ImGui::SameLine();
+    if (ImGui::RadioButton(room ? ("room " + room->name()).c_str() : "room", !a.worldMap)) a.worldMap = false;
+    if (a.worldMap) worldMap(a);
+    else if (room) roomMap(a, *room);
+    else ImGui::TextDisabled("Open a room from the outline, or look at the whole game.");
     ImGui::End();
 }
 

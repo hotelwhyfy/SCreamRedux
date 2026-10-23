@@ -38,7 +38,7 @@ void usage() {
         "  --screenshot FILE  write a PNG of the window after a few frames, then quit\n"
         "  --frames N         take it at frame N (default 20)\n"
         "  --input SCRIPT     synthetic input, \"FRAME ACTION ARGS; ...\": move X Y, down [1|3],\n"
-        "                     up [1|3], wheel DY, key [ctrl+][shift+]NAME (window points)\n");
+        "                     up [1|3], wheel DY, key [ctrl+][shift+]NAME, text WORDS_WITH_UNDERSCORES\n");
 }
 
 bool readFile(const std::string& path, std::string& out) {

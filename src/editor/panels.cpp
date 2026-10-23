@@ -135,6 +135,85 @@ bool argField(App& a, const char* label, doc::Expr& e) {
     return changed;
 }
 
+// A popup listing the text table; true (with `e` naming the global) when one was picked.
+bool pickText(App& a, doc::Expr& e) {
+    bool picked = false;
+    if (ImGui::SmallButton("pick text")) ImGui::OpenPopup("picktext");
+    if (ImGui::BeginPopup("picktext")) {
+        static std::string filter;
+        ImGui::SetNextItemWidth(400);
+        if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+        inputString("##f", filter);
+        ImGui::BeginChild("texts", {400, 300});
+        std::vector<const std::pair<const std::string, std::string>*> rows;
+        for (auto& kv : a.p.texts)
+            if (filter.empty() || kv.first.find(filter) != std::string::npos || kv.second.find(filter) != std::string::npos)
+                rows.push_back(&kv);
+        ImGuiListClipper clip;
+        clip.Begin(int(rows.size()));
+        while (clip.Step())
+            for (int i = clip.DisplayStart; i < clip.DisplayEnd; ++i)
+                if (ImGui::Selectable((rows[size_t(i)]->first + "  " + rows[size_t(i)]->second).c_str())) {
+                    e = doc::Expr::name(rows[size_t(i)]->first);
+                    picked = true;
+                    ImGui::CloseCurrentPopup();
+                }
+        ImGui::EndChild();
+        ImGui::EndPopup();
+    }
+    return picked;
+}
+
+// A text argument (feedback, a label, a dialogue line): typed as plain text.
+// A literal is edited in place; a text-table global is edited in the table
+// (where other calls may share it); anything else is shown as Lua.
+bool textArg(App& a, const char* label, doc::Expr& e) {
+    std::string out;
+    if (e.kind == doc::Expr::Kind::String) {
+        ImGui::SetNextItemWidth(-90);
+        bool changed = editString(label, e.str, out);
+        if (changed) e = doc::Expr::string(out);
+        changed |= assetDrop(e);
+        ImGui::PushID(label);
+        if (!e.str.empty() && ImGui::SmallButton("to text table")) {
+            // Queued before the caller's own edit, so the global exists when the call names it.
+            std::string name = a.p.nextTextName(), text = e.str;
+            a.later([&a, name, text] {
+                if (!a.p.addText(name, text)) a.status = a.p.error;
+            });
+            e = doc::Expr::name(name);
+            changed = true;
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("keep this text with the others at the top of the script");
+        ImGui::SameLine();
+        changed |= pickText(a, e);
+        ImGui::PopID();
+        return changed;
+    }
+    auto it = e.kind == doc::Expr::Kind::Name ? a.p.texts.find(e.src) : a.p.texts.end();
+    if (it == a.p.texts.end()) return argField(a, label, e);
+    ImGui::SetNextItemWidth(-90);
+    if (editString(label, it->second, out))
+        a.later([&a, name = e.src, out] {
+            if (!a.p.replaceItem(name, doc::Item::Kind::Assign, name + " = " + doc::quote(out))) a.status = a.p.error;
+        });
+    ImGui::TextDisabled("  %s in the text table", e.src.c_str());
+    ImGui::SameLine();
+    ImGui::PushID(label);
+    bool picked = pickText(a, e);
+    ImGui::SameLine();
+    if (ImGui::SmallButton("own text")) e = doc::Expr::string(it->second), picked = true;
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("a copy of the text for this call alone");
+    ImGui::PopID();
+    return picked;
+}
+
+// Which arguments of a call are text (0-based).
+bool isTextArg(const std::string& fn, size_t k) {
+    return (fn == "scInventorySet" && (k == 1 || k == 2)) || (fn == "scScriptAdd" && k == 1) ||
+           (fn == "scChoiceAdd" && k == 0);
+}
+
 // The handler, target and text of an action (scOnClick, scReaction, ...), from argument `k`.
 bool actionEditor(App& a, doc::Call& c, size_t k) {
     bool changed = false;
@@ -167,13 +246,15 @@ bool actionEditor(App& a, doc::Call& c, size_t k) {
             a.center = App::Center::Handler;
         }
         if (!h.empty() && !exists && ImGui::SmallButton(("create " + h + "()").c_str())) {
-            if (!a.p.insertBeforeBoot("function " + h + "()\n  scFeedback(\"...\")\nend")) a.status = a.p.error;
+            a.later([&a, h] {
+                if (!a.p.insertBeforeBoot("function " + h + "()\n  scFeedback(\"...\")\nend")) a.status = a.p.error;
+            });
             a.handler = h;
             a.center = App::Center::Handler;
         }
         changed |= argField(a, "name##handler", target);
     } else if (kind.src == "SC_FEEDBACK" || kind.src == "SC_FEEDBACK_EX") {
-        changed |= argField(a, "text", target);
+        changed |= textArg(a, "text", target);
         if (kind.src == "SC_FEEDBACK_EX") {
             while (c.args.size() < k + 3) c.args.push_back(doc::Expr::string(""));
             changed |= argField(a, "voice", c.args[k + 2]);
@@ -213,6 +294,8 @@ bool callsEditor(App& a, std::vector<doc::Call>& calls) {
                     if (faceArg && c.args[k].src != "SC_ZOOM") {
                         ImGui::SetNextItemWidth(-90);
                         changed |= nameCombo(label.c_str(), c.args[k], kFaces, 6);
+                    } else if (isTextArg(c.fn, k)) {
+                        changed |= textArg(a, label.c_str(), c.args[k]);
                     } else {
                         changed |= argField(a, label.c_str(), c.args[k]);
                     }
@@ -251,7 +334,7 @@ void elementButtons(App& a, const ElementPath& path, model::Element& e) {
     if (ImGui::BeginPopup("addcall")) {
         for (auto& t : callTemplates(e.kind()))
             if (ImGui::Selectable((t.fn + " " + (t.args.empty() ? "" : t.args[0].src)).c_str())) {
-                a.edit(path, [&](model::Element& el) {
+                a.edit(path, [t](model::Element& el) {
                     bool inside = el.scoped && (t.fn == "scTexture" || t.fn == "scFootstep" || t.fn == "scAudio" ||
                                                 t.fn == "scSetLastVisited");
                     if (!inside) {
@@ -274,15 +357,16 @@ void elementButtons(App& a, const ElementPath& path, model::Element& e) {
         parent.index.pop_back();
         model::Element copy = e;
         copy.head.args[1] = doc::Expr::string(e.name() + "-copy");
-        auto insert = [&](std::vector<model::Element>& list) { list.insert(list.begin() + i + 1, copy); };
         if (parent.index.empty()) {
-            if (auto* b = a.p.builder(path.builder)) {
-                b->dirty = true;
-                insert(b->body);
-                if (!a.p.commit()) a.status = a.p.error;
-            }
+            a.later([&a, path, i, copy] {
+                if (auto* b = a.p.builder(path.builder)) {
+                    b->dirty = true;
+                    b->body.insert(b->body.begin() + i + 1, copy);
+                    if (!a.p.commit()) a.status = a.p.error;
+                }
+            });
         } else {
-            a.edit(parent, [&](model::Element& p) { insert(p.children); });
+            a.edit(parent, [i, copy](model::Element& p) { p.children.insert(p.children.begin() + i + 1, copy); });
         }
     }
     ImGui::SameLine();
@@ -294,13 +378,15 @@ void elementButtons(App& a, const ElementPath& path, model::Element& e) {
             int i = parent.index.back();
             parent.index.pop_back();
             if (parent.index.empty()) {
-                if (auto* b = a.p.builder(path.builder)) {
-                    b->dirty = true;
-                    b->body.erase(b->body.begin() + i);
-                    if (!a.p.commit()) a.status = a.p.error;
-                }
+                a.later([&a, path, i] {
+                    if (auto* b = a.p.builder(path.builder)) {
+                        b->dirty = true;
+                        b->body.erase(b->body.begin() + i);
+                        if (!a.p.commit()) a.status = a.p.error;
+                    }
+                });
             } else {
-                a.edit(parent, [&](model::Element& p) { p.children.erase(p.children.begin() + i); });
+                a.edit(parent, [i](model::Element& p) { p.children.erase(p.children.begin() + i); });
             }
             if (a.object == path) a.object = {};
             if (a.view == path) a.view = {}, a.object = {};
@@ -319,7 +405,7 @@ void inspectElement(App& a, const ElementPath& path) {
     std::string name;
     ImGui::SetNextItemWidth(-90);
     if (editString("name", e->name(), name))
-        a.edit(path, [&](model::Element& el) { el.head.args[1] = doc::Expr::string(name); });
+        a.edit(path, [name](model::Element& el) { el.head.args[1] = doc::Expr::string(name); });
     if (e->kind() == "SC_OBJECT") {
         Rect r;
         int face;
@@ -327,7 +413,7 @@ void inspectElement(App& a, const ElementPath& path) {
             ImGui::TextColored({1, 0.7f, 0.3f, 1}, "extends past the face edge: the engine clips it");
         bool disabled = e->find("scDisable", "SC_OBJECT") != nullptr;
         if (ImGui::Checkbox("disabled at start (scDisable)", &disabled))
-            a.edit(path, [&](model::Element& el) {
+            a.edit(path, [disabled](model::Element& el) {
                 if (disabled) el.props.push_back({"scDisable", {doc::Expr::name("SC_OBJECT")}});
                 else el.props.erase(std::remove_if(el.props.begin(), el.props.end(), [](auto& c) {
                                         return c.fn == "scDisable" && !c.args.empty() && c.args[0].src == "SC_OBJECT";
@@ -364,7 +450,7 @@ void inspectElement(App& a, const ElementPath& path) {
             }
         }
     }
-    if (changed) a.edit(path, [&](model::Element& el) { el = copy; });
+    if (changed) a.edit(path, [copy](model::Element& el) { el = copy; });
     if (model::Element* now = a.p.find(path)) elementButtons(a, path, *now);
     ImGui::PopID();
 }
@@ -393,7 +479,7 @@ void addView(App& a, const ElementPath& room, const std::string& kind) {
         texture("SC_ZOOM");
     ElementPath path = room;
     path.index.push_back(int(r->children.size()));
-    a.edit(room, [&](model::Element& el) { el.children.push_back(std::move(v)); });
+    a.edit(room, [v](model::Element& el) { el.children.push_back(v); });
     a.select(room, path);
     a.center = App::Center::View;
 }
@@ -421,8 +507,10 @@ void worldTab(App& a) {
                                "  scTexture(SC_RIGHT, \"\")\n  scTexture(SC_UP, \"\")\n  scTexture(SC_DOWN, \"\")\n" +
                                "  scEnd(SC_NODE)\n\n  scEnd(SC_ROOM)\nend";
             // A builder only counts once the boot code calls it.
-            if (!a.p.insertBeforeBoot(text) || !a.p.insertBootCall(fn + "()")) a.status = "new room: " + a.p.error;
-            else a.jumpTo(name);
+            a.later([&a, text, fn, room = name] {
+                if (!a.p.insertBeforeBoot(text) || !a.p.insertBootCall(fn + "()")) a.status = "new room: " + a.p.error;
+                else a.jumpTo(room);
+            });
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();
@@ -473,6 +561,26 @@ void listTab(App& a, std::vector<Project::Ref>& refs, ElementPath& sel) {
 }
 
 void textTab(App& a) {
+    // A new entry: the next free msgNNNN unless another name is typed.
+    static std::string newName, newText;
+    if (newName.empty()) newName = a.p.nextTextName();
+    ImGui::SetNextItemWidth(90);
+    inputString("##newname", newName);
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(-50);
+    inputString("##newtext", newText);
+    ImGui::SameLine();
+    ImGui::BeginDisabled(newName.empty() || a.p.texts.count(newName));
+    if (ImGui::Button("Add")) {
+        a.later([&a, n = newName, t = newText] {
+            if (!a.p.addText(n, t)) a.status = a.p.error;
+            else a.status = "added " + n;
+        });
+        newName.clear(), newText.clear();
+    }
+    ImGui::EndDisabled();
+    ImGui::TextDisabled("then use it by name, e.g. as a hotspot's feedback text");
+    ImGui::Separator();
     static std::string filter;
     ImGui::SetNextItemWidth(-1);
     inputString("##textfilter", filter);
@@ -492,7 +600,9 @@ void textTab(App& a) {
             ImGui::SetNextItemWidth(-1);
             if (editString("##t", text, out)) {
                 std::string n = name;  // the edit re-parses: keep the name
-                if (!a.p.replaceItem(n, doc::Item::Kind::Assign, n + " = " + doc::quote(out))) a.status = a.p.error;
+                a.later([&a, n, out] {
+                    if (!a.p.replaceItem(n, doc::Item::Kind::Assign, n + " = " + doc::quote(out))) a.status = a.p.error;
+                });
             }
             ImGui::PopID();
         }
@@ -505,7 +615,9 @@ void codeTab(App& a) {
     inputString("##newh", newName);
     ImGui::SameLine();
     if (ImGui::Button("New")) {
-        if (!a.p.insertBeforeBoot("function " + newName + "()\nend")) a.status = a.p.error;
+        a.later([&a, n = newName] {
+            if (!a.p.insertBeforeBoot("function " + n + "()\nend")) a.status = a.p.error;
+        });
         a.handler = newName;
         a.center = App::Center::Handler;
     }
@@ -648,8 +760,10 @@ void drawHandler(App& a) {
     ImGui::EndDisabled();
     if (apply) {
         std::string name = a.handler;
-        if (!a.p.replaceItem(name, doc::Item::Kind::Function, a.codeBuffer)) a.status = "not applied: " + a.p.error;
-        else a.codeFor.clear(), a.status = "applied " + name;
+        a.later([&a, name, code = a.codeBuffer] {
+            if (!a.p.replaceItem(name, doc::Item::Kind::Function, code)) a.status = "not applied: " + a.p.error;
+            else a.codeFor.clear(), a.status = "applied " + name;
+        });
     }
     // Who refers to this function: hotspots, reactions, choices, other code.
     std::vector<std::string> refs;
