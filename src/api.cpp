@@ -554,7 +554,7 @@ const Entry kEntries[] = {
     FN(scPlaylistPrevious, S::Done, ""),
     FN(scPlaylistQueue, S::Done, ""),
     FN(scPlaylistStart, S::Done, ""),
-    FN(scPlaylistStop, S::Done, "fade rate per audio tick: tick length assumed (2 ms)"),
+    FN(scPlaylistStop, S::Done, "fade F = F seconds from full volume (audio tick taken as 2.5 ms)"),
     FN(scReaction, S::Done, ""),
     FN(scRun, S::Done, "main loop: intro, menu, game"),
     FN(scScriptAdd, S::Done, ""),

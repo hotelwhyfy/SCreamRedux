@@ -12,9 +12,13 @@
 namespace {
 
 // A fade of rate F moves the gain by 0.0025/F per tick of the audio thread
-// (Sleep(1) in a loop, 0x419540). The tick length isn't in the binary; the
-// scripts' "scTrackFadeOut(1) scSleep(1) scTrackStop()" fits about 2 ms.
-constexpr double kAudioTick = 0.002;
+// (Sleep(1) in a loop, 0x419540). How long Sleep(1) lasts is Windows' timer
+// resolution at run time (15.6 ms by default, ~1 ms when any program on the
+// machine asks for it; the shipped wrap_oal.dll asks for only 25 ms), so it
+// varied between players' PCs. The design says F was meant as seconds from
+// full volume: the playlist cuts a fading bank after F seconds and the
+// scripts do "scTrackFadeOut(1) scSleep(1) scTrackStop()". That is a 2.5 ms tick.
+constexpr double kAudioTick = 0.0025;
 double fadeSeconds(float from, float to, int f) { return std::abs(to - from) * f * kAudioTick / 0.0025; }
 
 float volume10(double v) { return float(std::clamp(v, 0.0, 10.0) / 10.0); }

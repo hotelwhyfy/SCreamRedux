@@ -288,8 +288,13 @@ ECX), so Ghidra's decompiler hides arguments; read the disassembly alongside. Sc
   -RL/-RR files when SURROUND is on; with a stereo device all three just mix). scTrackPlay
   always hard-stops channels 1–3 and restarts (volume SC_VOLUME/10, looping per scTrackSet's
   second argument). Fades are **rates**: every audio-thread tick the gain moves 0.0025/F
-  toward its target (F = 0: no fade); the tick is a `Sleep(1)` loop whose length isn't in the
-  binary — taken as 2 ms (the scripts' `scTrackFadeOut(1) scSleep(1) scTrackStop()` fits).
+  toward its target (F = 0: no fade); the tick is a `Sleep(1)` loop, and how long Sleep(1)
+  lasts is Windows' timer resolution at run time: 15.6 ms by default, ~1 ms whenever any
+  program asks for it (`timeBeginPeriod`). scream.exe doesn't ask; the shipped `wrap_oal.dll`
+  asks for 25 ms when it opens its software device (`alcOpenDevice`, `0x100315a3`), which
+  changes nothing. So fade lengths varied between PCs. The design treats F as seconds from
+  full volume (the playlist cuts a fading bank after F seconds; the scripts' `scTrackFadeOut(1)
+  scSleep(1) scTrackStop()`): a 2.5 ms tick, used here.
   scTrackFadeOut(n) uses F = 1 when fewer than n whole seconds remain, never stops the track;
   a negative n reads the last queued playlist track's SC_FADEOUT (as compiled). scFXSet
   fades are the same rates; a fade-in starts from silence. scTrackPlay/Stop/FadeOut are
@@ -566,7 +571,8 @@ saves). Ghidra on `scream.exe` covers semantics the scripts don't reveal.
 ## Open questions
 
 - Exactly when the two zoom sounds play (`0x416120`, `0x4160d0`).
-- The audio thread's tick length (fade durations scale with it; 2 ms assumed).
+- Fade lengths depended on the player's Windows timer resolution (see Music and fades);
+  2.5 ms (F = seconds) is the design's intent, not a measured value.
 - The net effect of the reader's ZOOM + ZOOMOUT after loading a game saved in a zoom (the
   zoom stack is restored as saved).
 - Saved games are untested against files from the original executables (none available).

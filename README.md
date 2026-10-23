@@ -169,8 +169,9 @@ Not yet verified:
 
 - **Saved games** follow the original writer's code but haven't been checked
   against a file the original executable made.
-- **Fade lengths** depend on the original audio thread's timer interval, which
-  isn't recorded in the binary. It is assumed to be 2 ms.
+- **Fade lengths** in the original depended on the player's Windows timer
+  setting, so they varied between PCs. Here a fade of F lasts F seconds from
+  full volume, which is what the game's scripts and playlist were written for.
 
 Deliberate differences:
 

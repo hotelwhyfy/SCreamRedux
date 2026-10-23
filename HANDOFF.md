@@ -47,8 +47,8 @@ a failed `scBind` unbinds; rooms remember the last node; view switches release `
 1. Untested against real files: saved games in the original formats (`src/save.cpp`, DC and
    2006 layouts from the writers `0x411370` / P `0x40f1f0`). An original save would confirm
    the layout (load it with F7 after copying it to the save folder as `scream.011`).
-2. Assumptions left (NOTES.md "Open questions"): the audio thread's tick (2 ms) that sets
-   fade lengths; the reader's ZOOM+ZOOMOUT after loading in a zoom; the 2006 cloud generator's
+2. Assumptions left (NOTES.md "Open questions"): fade lengths (they depended on the
+   player's Windows timer resolution; F = seconds, a 2.5 ms tick, is the design's intent); the reader's ZOOM+ZOOMOUT after loading in a zoom; the 2006 cloud generator's
    seed state (Watcom rand, never seeded).
 3. Deliberate differences: the window scales the configured mode (the original changed the
    display mode or laid out in real pixels); loading restores the start-of-game baseline
