@@ -61,7 +61,7 @@ a failed `scBind` unbinds; rooms remember the last node; view switches release `
 ## Layout
 
 ```
-CMakeLists.txt          build (targets: lua51, ogg, theoradec, scream)
+CMakeLists.txt          build (targets: lua51, ogg, theoradec, imgui, screamcore = src/ minus main.cpp, scream, scream-edit)
 src/
   main.cpp              CLI options, boot (scream.sc then game script), --verify-media, --api-status
   engine.hpp/.cpp       Engine: options, scream.cfg, location, camera, input, main loop (scRun), render, cursor, transitions
@@ -81,6 +81,10 @@ src/
   setup.cpp             the setup launcher (--setup): edits scream.cfg; test hook SCREAM_SETUP_KEYS
   platform.hpp, platform_mac.mm, platform.cpp   Option/Alt at start, macOS Settings… menu, relaunch
   constants.hpp         SC_* values (must match scream.sc)
+  editor/               scream-edit (plan: ~/.claude/plans/we-have-the-game-abundant-wozniak.md)
+    luadoc.*            Lua tokenizer/parser: top-level items with spans; builder bodies as calls
+    model.*             builder calls folded into elements (scCreate + props, scBegin/scEnd children); writer in the original layout
+    app.*, main.cpp     ImGui window; CLI --stats / --roundtrip
 tools/
   scream_res.py         list/extract .res archives
   api_usage.py          catalogue sc* usage in decompiled scripts -> docs/api-usage-*.md
@@ -88,7 +92,7 @@ tools/
   watch_explore.sh      progress/stall/runaway-clock watcher for an --explore run
   ghidra/*.java         headless Ghidra scripts (below); sc_names.txt = the 87 names
   vendor/unluac.jar     Lua decompiler (gitignored)
-third_party/            lua-5.1.5 (lundump.c patched, see lundump-size_t.patch), stb,
+third_party/            imgui-1.91.9b (core + SDL3/OpenGL3 backends), lua-5.1.5 (lundump.c patched, see lundump-size_t.patch), stb,
                         libogg-1.3.6, libtheora-1.2.0; each has SOURCE.txt
 docs/api-usage-*.md     generated API usage tables
 extracted/ (gitignored) unpacked game data, decompiled scripts, Ghidra project and dumps
@@ -133,6 +137,10 @@ Always pass `--save-dir DIR` (a temp dir) so tests don't touch the user's saves/
 - `--check`: validates the world the script built (targets, handlers, files).
   `tools/check_script.py SCRIPT.lua DATA_DIR...` does the same over a decompiled script.
 - `--turbo`: no audio/video/rendering, game time fast-forwarded.
+- `--dump-world FILE`: the built world as text (rooms, views, objects, items, scripts, tracks,
+  globals); two scripts that build the same world give the same file. Editor round trip:
+  `scream-edit --roundtrip IN.lua OUT.lua`, then dump with `--data DIR_WITH_OUT --script OUT.lua`
+  and diff against the shipped script's dump.
 - `--crawl`: every hotspot click, item reaction, choice and dialogue from the start state;
   reports warnings/Lua errors per task (~2 min).
 - `--explore` / `--explore-hints FILE`: an automated player that plays a campaign until

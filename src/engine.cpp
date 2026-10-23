@@ -1653,6 +1653,10 @@ void Engine::run() {
         checkResult_ = checkWorld();
         return;
     }
+    if (!opts.dumpWorld.empty()) {
+        if (!dumpWorld(opts.dumpWorld)) checkResult_ = 1;
+        return;
+    }
     if (!init())
         return;
     fixScripts();

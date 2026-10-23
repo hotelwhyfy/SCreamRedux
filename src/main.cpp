@@ -46,6 +46,7 @@ void usage() {
         "  --api-status      print implementation status of all sc* functions\n"
         "  --verify-media    decode every image, sound and video in the archives\n"
         "  --check           check the world the script builds (targets, handlers, files)\n"
+        "  --dump-world FILE write the world the script builds as text, then quit\n"
         "  --turbo           fast-forward: no audio or video, game time runs 30x\n"
         "  --crawl           click every object, use every item reaction, run every choice\n"
         "                    and dialogue from the start state; report warnings and errors\n"
@@ -143,7 +144,7 @@ int run(const Options& opts, std::string script) {
     // world and calls scRun(), which only returns when the player quits.
     if (!engine.script.runFile(boot) || !engine.script.runFile(game))
         return 1;
-    return opts.check && engine.checkResult_ ? 2 : 0;
+    return (opts.check || !opts.dumpWorld.empty()) && engine.checkResult_ ? 2 : 0;
 }
 
 }  // namespace
@@ -178,6 +179,7 @@ int main(int argc, char** argv) {
         else if (a == "--api-status") { printApiStatus(); return 0; }
         else if (a == "--verify-media") opts.verifyMedia = true;
         else if (a == "--check") opts.check = true;
+        else if (a == "--dump-world") opts.dumpWorld = next();
         else if (a == "--turbo") opts.turbo = true;
         else if (a == "--crawl") opts.crawl = opts.turbo = true;
         else if (a == "--explore") opts.explore = opts.turbo = true;
@@ -186,7 +188,7 @@ int main(int argc, char** argv) {
         else { std::fprintf(stderr, "unknown option %s\n", a.c_str()); usage(); return 2; }
     }
     if (opts.dataDirs.empty()) { usage(); return 2; }
-    const bool automated = opts.turbo || opts.check || opts.verifyMedia || (!opts.screenshot.empty() && setup != 2);
+    const bool automated = opts.turbo || opts.check || !opts.dumpWorld.empty() || opts.verifyMedia || (!opts.screenshot.empty() && setup != 2);
     if (setup == 0 && !automated && platform::setupKeyHeld())
         setup = 1;
     const SetupTest setupTest{std::getenv("SCREAM_SETUP_KEYS") ? std::getenv("SCREAM_SETUP_KEYS") : "",

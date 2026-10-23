@@ -56,6 +56,7 @@ struct Options {
     int windowW = 0, windowH = 0;  // --window; 0: scream.cfg WIDTH x HEIGHT
     bool verifyMedia = false;   // decode every asset and exit
     bool check = false;         // validate the built world, then exit (check.cpp)
+    std::string dumpWorld;      // write the built world as text, then exit (check.cpp)
     bool turbo = false;         // fast-forward for automated runs: no audio or video, fast clock
     bool crawl = false;         // visit every room/view/object and report problems (crawl.cpp)
     bool explore = false;       // play the game automatically until stuck or finished (explore.cpp)
@@ -126,6 +127,7 @@ public:
     void fixScripts();  // corrections of bugs in the shipped scripts (engine.cpp)
     int checkWorld();  // --check: report missing targets, handlers and files; returns the count
     int checkResult_ = 0;
+    bool dumpWorld(const std::string& path);  // --dump-world: the built world as text (check.cpp)
     // --crawl (crawl.cpp): one step per frame; false when finished.
     bool crawlStep();
     bool crawlRender_ = false;

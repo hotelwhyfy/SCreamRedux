@@ -1,0 +1,3 @@
+Dear ImGui v1.91.9b from https://github.com/ocornut/imgui/archive/refs/tags/v1.91.9b.tar.gz
+sha256 8e1bbc76c71d74fef2fb85db7e7ca8eba13d6a86623c54992b60162db554ffdb (MIT, LICENSE.txt)
+Only the core files and the SDL3 + OpenGL3 backends are kept.

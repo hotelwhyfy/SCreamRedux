@@ -567,6 +567,31 @@ year older. Where they behave differently the port follows them when the 2006 ga
   script bugs aren't in the 2006 script). Explorer: plays to `finale()` (~37k actions) with
   the same hints as the DC (same handlers, combination and phone numbers).
 
+## How the scripts were written (for the editor)
+
+What the shipped scripts say about the developers' own workflow (the basis of `scream-edit`):
+
+- No editor traces in `scream.exe`: its only debug strings are Lua's. The scripts' debug info
+  names one source file each, `scratches-en.lua` (2006) and `scratches.lua` (DC): a single
+  hand-kept file per language, all text as globals at the top.
+- 98.9% of the `scPlace` numbers (9,192 DC, 8,132 2006) are multiples of 5: rectangles read
+  off an image editor and rounded, not dragged in a tool. `SC_SHOW_HOTSPOTS` was the check.
+- The DC bytecode's line info (`luac -l`) shows a template kept by hand. Within the builders
+  (the `create*` functions the boot code runs), there is a blank line before every `scCreate`
+  (2,863 of 2,876; the few longer gaps are comments), none after an item's `scInventorySet` /
+  `scInventoryReaction` (51 of 55), and `scOnHover(...) scOnClick(...)` share one line (all 2,297).
+  The six `scTexture` calls are one block followed by a blank line. `scEnd` follows directly,
+  but a blank line separates two `scEnd`s (44 of 57). Functions are 2 or 3 lines apart.
+  Handlers have irregular gaps (comments).
+- The builders are pure straight-line calls whose arguments are only SC_ constants, numbers,
+  strings, globals and a few `globalMusicVolume - n`. So the world is declared in what amounts
+  to a data format, and everything else is code. `scream-edit` reads that format back:
+  `--roundtrip` regenerates every builder (DC 60, 2006 40). The DC and 2006 worlds built
+  from the shipped bytecode, the unluac source and the regenerated source are identical
+  (`scream --dump-world`). The regenerated layout matches the shipped line info in 99.70% of
+  the 14,461 gaps between calls (29 of 55 builders identical; the rest differ by comments and
+  discretionary blank lines).
+
 ## Porting strategy
 
 Embed Lua 5.1 and run the original `scream.sc` + `scratches.sc` unmodified; reimplement the

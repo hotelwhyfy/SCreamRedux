@@ -3,7 +3,10 @@
 // handler and asset a script declared must exist.
 
 #include <cstdio>
+#include <fstream>
 #include <set>
+#include <vector>
+#include <algorithm>
 
 #include "constants.hpp"
 #include "engine.hpp"
@@ -141,4 +144,88 @@ int Engine::checkWorld() {
     Checker c{*this, 0, {}};
     c.run();
     return c.problems;
+}
+
+// --dump-world: everything the script built, one fact per line in creation
+// order, so two scripts that build the same world give the same file (the
+// editor's round-trip test). Lua's string and number globals follow, sorted.
+bool Engine::dumpWorld(const std::string& path) {
+    std::ofstream out(path, std::ios::binary);
+    if (!out)
+        return false;
+    auto action = [](const Action& a) {
+        return std::to_string(a.kind) + " [" + a.arg + "]" + (a.arg2.empty() ? "" : " [" + a.arg2 + "]");
+    };
+    auto reactions = [&](const std::string& indent, const std::vector<Reaction>& rs) {
+        for (const auto& r : rs)
+            out << indent << "reaction " << r.item << " " << action(r.action) << "\n";
+    };
+    auto view = [&](const View& v) {
+        out << "  " << (v.isZoom ? "zoom " : "node ") << v.index << " " << v.name << "\n";
+        if (v.isZoom)
+            out << "    image " << v.image << "\n";
+        for (size_t f = 0; f < v.faces.size(); ++f)
+            if (!v.faces[f].empty()) out << "    face " << f + 1 << " " << v.faces[f] << "\n";
+        if (!v.footstep.empty()) out << "    footstep " << v.footstep << "\n";
+        for (const auto& [k, f] : v.audio) out << "    audio " << k << " " << f << "\n";
+        for (const auto& o : v.objects) {
+            out << "    object " << o->index << " " << o->name << " face " << o->face << " rect " << o->rect.x << " "
+                << o->rect.y << " " << o->rect.w << " " << o->rect.h << " cursor " << o->cursor << " click "
+                << action(o->click) << (o->enabled ? "" : " disabled") << "\n";
+            reactions("      ", o->reactions);
+        }
+    };
+    for (Room* r : world.roomList) {
+        if (!r) continue;
+        out << "room " << r->index << " " << r->name << " enter [" << r->onEnter << "] exit [" << r->onExit
+            << "] last [" << r->lastVisited << "]\n";
+        for (const auto& t : r->timers) out << "  timer " << t.id << " " << t.seconds << " " << t.fn << "\n";
+        for (const auto& v : r->nodes) view(*v);
+        for (const auto& v : r->zooms) view(*v);
+    }
+    for (Item* it : world.itemList) {
+        if (!it) continue;
+        out << "item " << it->index << " " << it->name << " [" << it->icon << "] [" << it->label << "] [" << it->text
+            << "] [" << it->voice << "]\n";
+        reactions("  ", it->reactions);
+    }
+    for (const auto& [n, d] : world.dialogues) {
+        out << "script " << n << "\n";
+        for (const auto& l : d->lines) out << "  line " << l.flag << " [" << l.voice << "] [" << l.text << "]\n";
+    }
+    for (const auto& [n, c] : world.choices) {
+        out << "choice " << n << "\n";
+        for (const auto& [text, fn] : c->options) out << "  option [" << text << "] " << fn << "\n";
+    }
+    for (Track* t : world.trackList) {
+        if (!t) continue;
+        out << "track " << t->index << " " << t->name << " [" << t->files[0] << "] [" << t->files[1] << "] ["
+            << t->files[2] << "] surround " << t->surround << " loop " << t->loop << " volume " << t->volume
+            << " fade " << t->fadeIn << " " << t->fadeOut << "\n";
+    }
+    for (const auto& [n, o] : world.overlays)
+        out << "overlay " << n << " [" << o->args[0] << "] [" << o->args[1] << "] [" << o->args[2] << "]\n";
+    for (const auto& img : menu.images) out << "menu image " << img << "\n";
+    for (const auto& fn : menu.newGame) out << "menu game " << fn << "\n";
+    for (const auto& [k, v] : menu.extra) out << "menu extra " << k << " " << v << "\n";
+    for (const auto& [k, f] : cursors) out << "cursor " << k << " " << f << "\n";
+    for (const auto& [k, v] : hints) out << "hint " << k << " [" << v << "]\n";
+    out << "font " << font << "\n";
+    for (const auto& t : globalTimers_) out << "global timer " << t.id << " " << t.seconds << " " << t.fn << "\n";
+
+    lua_State* L = script.state();
+    std::vector<std::pair<std::string, std::string>> globals;
+    lua_pushnil(L);
+    while (lua_next(L, LUA_GLOBALSINDEX)) {
+        if (lua_type(L, -2) == LUA_TSTRING && (lua_type(L, -1) == LUA_TSTRING || lua_type(L, -1) == LUA_TNUMBER)) {
+            lua_pushvalue(L, -1);  // lua_tostring converts in place: work on a copy
+            globals.emplace_back(lua_tostring(L, -3), std::string(lua_type(L, -2) == LUA_TNUMBER ? "n " : "s ") +
+                                                          lua_tostring(L, -1));
+            lua_pop(L, 1);
+        }
+        lua_pop(L, 1);
+    }
+    std::sort(globals.begin(), globals.end());
+    for (const auto& [k, v] : globals) out << "global " << k << " " << v << "\n";
+    return bool(out);
 }

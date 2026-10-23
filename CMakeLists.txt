@@ -40,8 +40,8 @@ if(NOT MSVC)
   target_compile_options(theoradec PRIVATE -w)
 endif()
 
-add_executable(scream
-  src/main.cpp
+# The engine as a library: the game (scream) and the editor (scream-edit) share it.
+add_library(screamcore STATIC
   src/resources.cpp
   src/images.cpp
   src/world.cpp
@@ -65,17 +65,42 @@ add_executable(scream
   src/setup.cpp)
 if(APPLE)
   enable_language(OBJCXX)
-  target_sources(scream PRIVATE src/platform_mac.mm)
-  target_link_libraries(scream PRIVATE "-framework AppKit" "-framework CoreGraphics")
+  target_sources(screamcore PRIVATE src/platform_mac.mm)
+  target_link_libraries(screamcore PUBLIC "-framework AppKit" "-framework CoreGraphics")
   set_source_files_properties(src/platform_mac.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
 else()
-  target_sources(scream PRIVATE src/platform.cpp)
+  target_sources(screamcore PRIVATE src/platform.cpp)
 endif()
-target_include_directories(scream PRIVATE src third_party/stb)
-target_link_libraries(scream PRIVATE lua51 theoradec SDL3::SDL3)
+target_include_directories(screamcore PUBLIC src third_party/stb)
+target_link_libraries(screamcore PUBLIC lua51 theoradec SDL3::SDL3)
+
+add_executable(scream src/main.cpp)
+target_link_libraries(scream PRIVATE screamcore)
+
+# Dear ImGui (core + SDL3 / OpenGL3 backends) for the editor.
+set(IMGUI_DIR third_party/imgui-1.91.9b)
+add_library(imgui STATIC
+  ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_tables.cpp
+  ${IMGUI_DIR}/imgui_widgets.cpp ${IMGUI_DIR}/imgui_demo.cpp
+  ${IMGUI_DIR}/backends/imgui_impl_sdl3.cpp ${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp)
+target_include_directories(imgui PUBLIC ${IMGUI_DIR} ${IMGUI_DIR}/backends)
+target_link_libraries(imgui PUBLIC SDL3::SDL3)
 if(NOT MSVC)
-  target_compile_options(scream PRIVATE -Wall -Wextra -Wno-unused-parameter)
+  target_compile_options(imgui PRIVATE -w)
 endif()
+
+add_executable(scream-edit
+  src/editor/main.cpp
+  src/editor/app.cpp
+  src/editor/luadoc.cpp
+  src/editor/model.cpp)
+target_link_libraries(scream-edit PRIVATE screamcore imgui)
+
+foreach(t screamcore scream scream-edit)
+  if(NOT MSVC)
+    target_compile_options(${t} PRIVATE -Wall -Wextra -Wno-unused-parameter)
+  endif()
+endforeach()
 
 # stb headers are third-party; keep their warnings out of our build output.
 set_source_files_properties(src/images.cpp src/audio.cpp PROPERTIES COMPILE_OPTIONS "-w")
