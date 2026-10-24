@@ -219,3 +219,14 @@ Deliberate differences:
   file.
 
 These lists are kept in full in [NOTES.md](NOTES.md).
+
+## License
+
+SCream Redux is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version. See [LICENSE](LICENSE).
+
+The libraries in `third_party/` keep their own licenses (Lua: MIT; libogg and
+libtheora: BSD; stb: public domain or MIT). *Scratches* and its data are
+© Nucleosys and are not covered by this license.
