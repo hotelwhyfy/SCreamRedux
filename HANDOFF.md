@@ -82,6 +82,7 @@ src/
   platform.hpp, platform_mac.mm, platform.cpp   Option/Alt at start, macOS Settings… menu, relaunch
   constants.hpp         SC_* values (must match scream.sc)
 tools/
+  extract_game.py       collect the engine's files from the original discs into one directory
   scream_res.py         list/extract .res archives
   api_usage.py          catalogue sc* usage in decompiled scripts -> docs/api-usage-*.md
   check_script.py       static reference check over a decompiled script
@@ -96,20 +97,19 @@ extracted/ (gitignored) unpacked game data, decompiled scripts, Ghidra project a
 
 ## Data (gitignored, user's own copy)
 
-ISOs + `scratches-patch.exe`, `scratches-dc-patch.exe`, `scratches-dc-update.exe`
-in the repo root. Unpacked into `extracted/`:
+The original discs and installers are not part of the repo; `tools/extract_game.py` makes a
+data folder from them. In `extracted/`:
 
-- `extracted/dc/install` — DC disc 1: `scream.sc`, `scratches.sc`, `scratches.res`, `scream.res`, …
-- `extracted/dc/update` — DC update: `scratches.sc` (latest), `update.res` (HD overlay), `scream.exe` (the one analysed)
-- `extracted/dc/patch` — DC patch scripts
-- `extracted/2006/{install,disc}` — 2006 release (`install`: scripts, `scream.res`, exe; `disc`: `scratches.res`); `extracted/patch` — 2006 exe patch
+- `extracted/dc` — DC, only the files the engine reads (disc 1 + disc 2 update: `scream.cfg`, `scream.sc`, `scream.res`, `sdc-intro.srt`, `scratches.res`, the Jun 2007 `scratches.sc`, `update.res`); its `scream.cfg` has the user's `WIDESCREEN 1`
+- `extracted/2006` — 2006 release, only the five files the engine reads (`scream.cfg`, `scream.sc`, `scratches.sc`, `scream.res`, `scratches.res`)
+- `extracted/exe/{2006,2006-patch,dc,dc-update}/scream.exe` — the original exes, kept for reverse engineering only (`dc-update` is the one analysed)
 - `extracted/decompiled/{dc,2006}/{scratches,scream}.lua` — unluac output
 - `extracted/ghidra-project/` — the Ghidra project (`scream_dc`); `extracted/ghidra/` — dumps
 - `extracted/explore-sdc.hints` — clue-puzzle answers for `--explore` (game content: never commit)
 
 Run:
-- DC: `./build/scream --data extracted/dc/install --data extracted/dc/update`
-- 2006: `./build/scream --data extracted/2006/install --data extracted/2006/disc`
+- DC: `./build/scream --data extracted/dc`
+- 2006: `./build/scream --data extracted/2006`
 
 (later `--data` dirs win). Saves/prefs: `~/Library/Application Support/SCreamRedux/Scratches/`.
 
@@ -151,7 +151,7 @@ Always pass `--save-dir DIR` (a temp dir) so tests don't touch the user's saves/
 ```
 export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
 P=$(pwd)/extracted/ghidra-project     # re-create with -import if missing:
-/opt/homebrew/opt/ghidra/libexec/support/analyzeHeadless $P scream_dc -import extracted/dc/update/scream.exe \
+/opt/homebrew/opt/ghidra/libexec/support/analyzeHeadless $P scream_dc -import extracted/exe/dc-update/scream.exe \
    -overwrite -scriptPath tools/ghidra -postScript ExportScApi.java $(pwd)/extracted/ghidra/dc $(pwd)/tools/ghidra/sc_names.txt
 # afterwards, on the existing project (one process at a time: the project locks):
 … analyzeHeadless $P scream_dc -process scream.exe -noanalysis -scriptPath tools/ghidra \

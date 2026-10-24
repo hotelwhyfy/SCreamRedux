@@ -9,19 +9,38 @@ and *Scratches – Director's Cut* (2007).
 |---|---|---|---|
 | 2006 retail disc | `scream.exe` (Jan 2006) | Lua 5.0 bytecode | `scratches.res` (2829 entries) |
 | 2006 patch (`scratches-patch.exe`) | `scream.exe` (Apr 2006, same size, ~474 KB differs) | — | — |
-| DC disc 1 | `scream.exe` (Apr 2007) | Lua 5.1 bytecode | `scratches.res` (3351 entries, superset of 2006) |
+| DC single disc (`SDC_Setup.exe`) | `scream.exe` (Apr 2007, = disc 1's) | `scratches.sc` (Apr 30 2007) | `scratches.res` (3350 entries: disc 1's without `vid-logo_us.ogg`) |
+| DC disc 1 (two-disc set) | `scream.exe` (Apr 2007) | Lua 5.1 bytecode (May 22 2007) | `scratches.res` (3351 entries, superset of 2006) |
 | DC disc 2 update | `scream.exe` (May 2007) | `scratches.sc` (Jun 2007) | `update.res` (1623 entries: 1575 replace, 48 new) |
 | DC patch (`scratches-dc-patch.exe`) | — | `scratches_pre.sc` (May 10 2007), `scratches_post.sc` (Jun 2007) | — |
 
-DC patch is script-only. `scratches_post.sc` is byte-identical to the disc 2 update's
-`scratches.sc`. `scratches_pre.sc` matches the disc 1 script except it never plays
-`vid-logo_us.ogg` (presumably for installs without the update; installer logic not inspected).
+Copies checked (US, Got Game; MD5s in `tools/extract_game.py`): two 2006 discs (same files,
+but one rip has 2.8 MB of zeros inside `vid-credits.ogg`: a bad read the engine's
+`--verify-media` does not notice), the two-disc DC set, the single-disc DC, and the three
+patches/updates. The single-disc release is the same game as disc 1 apart from the script and
+the missing US logo video; its other files are byte-identical.
+
+The installers' scripts (strings of the compressed NSIS headers; the jump logic is not decoded):
+- 2006 patch: installs `scream.exe` (and a splash) into the folder you browse to, and warns
+  "all your current savegames will be invalidated" (the save format changed).
+- DC disc 2 update: no version check; it looks for `sdc-intro.srt` to find a DC install, so it
+  applies to either release. It installs `scratches.sc`, `update.res`, `scupdate.exe` and
+  `scream.exe`, runs `scupdate scratches.res update.res` (merges by filename, replace or add)
+  and deletes `scupdate.exe` and `update.res`. An updated install therefore has no
+  `update.res`; the port applies it as an overlay archive instead.
+- DC patch: recognises the install by the size of `scratches.sc`: 1120793 (single disc),
+  1120865 (`scratches_pre.sc`), 1121152 (disc 1), 1123942 (a version not seen) and 1124643
+  (the update's, "does not need to be patched"); anything else is "cannot recognize the
+  version". The post script needs the update's images and music (`trck-alt.ogg`,
+  `hs-gallery_n*d`, `chpl-int_n5ds2` are only in `update.res`), so it can only be for updated
+  installs, and pre for the rest; `pre` never plays `vid-logo_us.ogg`, which the single-disc
+  archive lacks. `tools/extract_game.py` follows that: post with the update, else pre.
+
 The Jun 2007 script adds Bailey dialogue branches, `hs-gallery_n*d` / `chpl-int_n5ds2` images
 and `trck-alt.ogg`. **Port target:** DC `scratches.res` + `update.res` overlay + Jun 2007 script.
 
-All installers are NSIS and unpack with `unar`; DC disc 1 data is a split 7z (`scratches.7z.001`…).
-`scupdate.exe` merges `update.res` into `scratches.res` by filename (replace or add), so a new
-engine can apply it as an overlay archive instead.
+All installers are NSIS and unpack with `unar` (or 7-Zip); DC disc 1 data is a split 7z
+(`scratches.7z.001`…).
 
 Original engine stack (from `scream.exe` strings): Open Watcom C/C++, OpenGL, OpenAL,
 Lua 5.1.1 (DC) / 5.0 (2006), IJG libjpeg, libogg/vorbis/theora.
@@ -537,7 +556,7 @@ ECX), so Ghidra's decompiler hides arguments; read the disassembly alongside. Sc
 
 ## 2006 release
 
-The 2006 executables (retail and patch; P = `extracted/patch/scream.exe`) are the same code a
+The 2006 executables (retail and patch; P = `extracted/exe/2006-patch/scream.exe`) are the same code a
 year older. Where they behave differently the port follows them when the 2006 game runs
 (`Engine::release2006`):
 - 800×600 (its cfg and defaults): every pixel layout at that scale.
@@ -557,6 +576,23 @@ year older. Where they behave differently the port follows them when the 2006 ga
   grey cube and, twice, the clouds tiled ×0.25 on two side-on hemispheres drifting apart
   sideways at 0.0001/call, (ONE, 1−SRC_ALPHA). Rain scrolls 0.045/frame. No ambience presets.
 - scSleep keeps the camera free and has no Esc skip; scGet returns nothing for other keys.
+
+### Retail vs patch
+
+`scratches-patch.exe` installs only `scream.exe` (Apr 2006); no script or archive changes, so
+the port needs nothing from it. The two exes are the same size but differ in 474,474 bytes, so
+the patch is a rebuild and a byte diff says little. Comparing their strings (the retail exe has
+not been through Ghidra, so its side of each point is from strings only):
+- Setup menu: retail has a 7th row, "accesibility mode" (sic), after slideshow mode; the patch
+  drops it, leaving 6 rows. The port follows the patch. What the row did is not known; the
+  DC's alternate control (`SC_FPS_STYLE`) may be its successor.
+- 'L' log toggle: retail shows "logging ON"/"logging OFF"; the patch has no such message.
+- F5 quicksave: both have "quicksave", but only the patch has the `scream.011` file name;
+  where the retail one saved (or whether it worked) is not known.
+- `scream.cfg`: the patch reads LANGUAGE; retail does not (neither reads DEBUG).
+- The patch imports Initialize/Enter/Leave/DeleteCriticalSection (retail creates a thread
+  but has no locks), presumably a fix for a race with that thread (audio streaming?).
+- The patch logs "Creating %s..." for each scCreate.
 
 - Its scripts are Lua 5.0 bytecode; `src/lua50.cpp` translates each chunk to 5.1 at load
   (layout, instruction fields, RK encoding, opcode numbers; 5.0 TEST = 5.1 TESTSET). The

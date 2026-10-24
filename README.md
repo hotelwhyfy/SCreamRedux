@@ -60,21 +60,70 @@ cmake --build build -j
 
 ## Game data
 
-Unpack the installers (see NOTES.md; `unar` handles the NSIS installers and the
-split 7z) so you have directories containing `scream.sc`, `scratches.sc`,
-`scream.cfg` and the `.res` archives. For the updated Director's Cut:
+The engine reads only a few files from the original game, and it looks for them
+in the directories given with `--data`. Nothing from the Windows installers has
+to run: `tools/extract_game.py` pulls the files out of the discs with `unar` or
+`7z` (`brew install unar`, `apt install unar`), so this works on macOS and Linux.
+It tells the edition from the scripts' Lua version (5.0 in 2006, 5.1 in the
+Director's Cut), so other regions and languages work too; `--edition 2006|dc`
+overrides that. Each file is listed with the original it matches, if it is one
+of the copies checked so far. A file the size of a known original with
+different content is flagged as probably damaged (a bad disc read), and a
+truncated or broken `.res` archive as broken. The output folder must be new or
+empty, so nothing from an earlier run is mixed in.
+
+### 2006 release
+
+The engine needs five files. Four come out of the disc's `setup.exe`:
+`scream.cfg` (settings, and the name of the game script), `scream.sc` (engine
+constants), `scratches.sc` (the game) and `scream.res` (the engine's cursor,
+font, rain and sky). The fifth, `scratches.res` (every image, sound and video,
+about 500 MB), is on the disc itself. The installed `scream.exe`, the OpenAL
+DLLs and the 2006 patch are not needed: the patch only replaces `scream.exe`
+(the port follows the patched version; see NOTES.md, "Retail vs patch").
 
 ```sh
-./build/scream --data extracted/dc/install --data extracted/dc/update
+python3 tools/extract_game.py /path/to/disc -o ~/Games/Scratches-2006
+./build/scream --data ~/Games/Scratches-2006
 ```
 
-Later `--data` directories override earlier ones, so the disc 2 update's
-`scratches.sc` and `update.res` (HD textures) take precedence. For the 2006
-release (scripts and `scream.res` from the installer, `scratches.res` from the disc):
+The disc can be a mounted or copied directory or an `.iso` image. If the game is
+already installed on Windows, its install folder works too, as long as it also
+has `scratches.res` (pass the disc as a second source otherwise).
+
+### Director's Cut
+
+It came as a two-disc set and as a single-disc release (`SDC_Setup.exe`, with
+an older script). The engine needs six files, plus a seventh from the update
+disc:
+
+| file | from | what it is |
+|---|---|---|
+| `scream.cfg` | disc 1 `setup.exe` / `SDC_Setup.exe` | settings, and the name of the game script |
+| `scream.sc` | disc 1 `setup.exe` / `SDC_Setup.exe` | engine constants |
+| `scream.res` | disc 1 `setup.exe` / `SDC_Setup.exe` | the engine's cursor, font, rain and sky |
+| `sdc-intro.srt` | disc 1 `setup.exe` / `SDC_Setup.exe` | subtitles for the intro |
+| `scratches.res` | disc 1 `scratches.7z.001`… / `SDC_Setup.exe` | every image, sound and video (715 MB) |
+| `scratches.sc` | disc 2 `scratches-dc-update.exe`, else disc 1 | the game (June 2007 version with the update) |
+| `update.res` | disc 2 `scratches-dc-update.exe` | HD textures, laid over `scratches.res` (564 MB) |
 
 ```sh
-./build/scream --data extracted/2006/install --data extracted/2006/disc
+python3 tools/extract_game.py /path/to/disc1 /path/to/disc2 -o ~/Games/Scratches-DC
+./build/scream --data ~/Games/Scratches-DC
 ```
+
+The update disc is meant to be used (the port targets the updated game), and it
+applies to the single-disc release too. Without it you get the original
+textures and that disc's script. The DC patch (`scratches-dc-patch.exe`) is
+optional: on an updated game its script is the update's; otherwise it installs
+its May 10 2007 script (disc 1's without the US logo video, which the
+single-disc release lacks), so pass it as a source if you want that.
+Sources can come in any order, and an existing Windows install folder works as
+one; there the update has already been merged into `scratches.res`. Not needed:
+`scream.exe`, `scream_splash.exe`, `scupdate.exe`, `7za.exe` and the OpenAL
+DLLs.
+
+If you pass several `--data` directories, later ones override earlier ones.
 
 ## Configuration: `scream.cfg`
 
