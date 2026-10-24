@@ -5,7 +5,6 @@
 #include <SDL3/SDL_init.h>
 #include <SDL3/SDL_main.h>
 
-#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -13,8 +12,6 @@
 #include <string>
 
 #include "api.hpp"
-#include "images.hpp"
-#include "video.hpp"
 #include "engine.hpp"
 #include "lua50.hpp"
 #include "platform.hpp"
@@ -53,40 +50,6 @@ void usage() {
         "  --explore-hints F puzzle solutions for --explore (format in explore.cpp)\n");
 }
 
-// Decode every image, sound and video once; report anything that fails.
-int verifyMedia(Engine& engine) {
-    for (const char* name : {"scream.res", "scratches.res", "update.res"}) {
-        auto path = engine.findData(name);
-        if (!path.empty())
-            engine.res.mount(ResArchive::open(path));
-    }
-    int ok = 0, bad = 0, videos = 0;
-    for (const auto& e : engine.res.list()) {
-        auto data = engine.res.read(e.name);
-        bool good = false;
-        if (e.type == ResArchive::Type::Ogg) {
-            static const uint8_t kTheora[] = {0x80, 't', 'h', 'e', 'o', 'r', 'a'};
-            auto head = data->begin() + long(std::min<size_t>(data->size(), 512));
-            bool isVideo = std::search(data->begin(), head, kTheora, kTheora + 7) != head;
-            if (isVideo) {
-                Video v;
-                good = v.open(*data);
-                for (double t = 0; good && !v.finished(); t += 1)
-                    v.advance(t);
-                ++videos;
-            } else {
-                good = Audio::decodeCheck(*data);
-            }
-        } else {
-            good = decodeImage(*data).has_value();
-        }
-        if (good) ++ok;
-        else { ++bad; std::printf("FAILED %s\n", e.name.c_str()); }
-    }
-    std::printf("%d decoded (%d videos), %d failed\n", ok, videos, bad);
-    return bad ? 1 : 0;
-}
-
 void printApiStatus() {
     int n;
     const api::Info* t = api::table(n);
@@ -103,7 +66,7 @@ int run(const Options& opts, std::string script) {
     Engine engine(opts);
     api::registerAll(engine);
     if (opts.verifyMedia)
-        return verifyMedia(engine);
+        return engine.verifyMedia();
 
     auto boot = engine.findData("scream.sc");
     // scream.exe runs SCRIPT.sc, else SCRIPT.lua (0x4061d0); Windows file names

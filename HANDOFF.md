@@ -63,7 +63,7 @@ a failed `scBind` unbinds; rooms remember the last node; view switches release `
 ```
 CMakeLists.txt          build (targets: lua51, ogg, theoradec, scream)
 src/
-  main.cpp              CLI options, boot (scream.sc then game script), --verify-media, --api-status
+  main.cpp              CLI options, boot (scream.sc then game script), --api-status
   engine.hpp/.cpp       Engine: options, scream.cfg, location, camera, input, main loop (scRun), render, cursor, transitions
   api.cpp               all 87 sc* functions + status table + debug Lua helpers
   world.hpp/.cpp        Room/View(node|zoom)/Object/Item/Dialogue/Choice/Track/Overlay, scCreate/scBind/scBegin/scEnd
@@ -77,7 +77,7 @@ src/
   ui.cpp menu.cpp       inventory + journal screens; main menu, setup, load/save slots, prefs
   save.cpp              scream.0NN saved games (DC/2006 layouts); new-game baseline snapshot
   effects.cpp           sky/fog/rain/night/candle/lamp/dream/ambience/screen colour
-  check.cpp crawl.cpp explore.cpp   test tools (below)
+  check.cpp crawl.cpp explore.cpp verify.cpp   test tools (below)
   setup.cpp             the setup launcher (--setup): edits scream.cfg; test hook SCREAM_SETUP_KEYS
   platform.hpp, platform_mac.mm, platform.cpp   Option/Alt at start, macOS Settings… menu, relaunch
   constants.hpp         SC_* values (must match scream.sc)

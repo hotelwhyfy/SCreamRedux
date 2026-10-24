@@ -59,6 +59,7 @@ add_executable(scream
   src/menu.cpp
   src/effects.cpp
   src/check.cpp
+  src/verify.cpp
   src/lua50.cpp
   src/crawl.cpp
   src/explore.cpp

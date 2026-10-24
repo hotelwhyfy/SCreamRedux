@@ -15,8 +15,8 @@ and *Scratches – Director's Cut* (2007).
 | DC patch (`scratches-dc-patch.exe`) | — | `scratches_pre.sc` (May 10 2007), `scratches_post.sc` (Jun 2007) | — |
 
 Copies checked (US, Got Game; MD5s in `tools/extract_game.py`): two 2006 discs (same files,
-but one rip has 2.8 MB of zeros inside `vid-credits.ogg`: a bad read the engine's
-`--verify-media` does not notice), the two-disc DC set, the single-disc DC, and the three
+but one rip has 2.8 MB of zeros inside `vid-credits.ogg`: a bad read the decoders skip over,
+which `--verify-media` catches by walking the Ogg pages), the two-disc DC set, the single-disc DC, and the three
 patches/updates. The single-disc release is the same game as disc 1 apart from the script and
 the missing US logo video; its other files are byte-identical.
 
@@ -245,7 +245,9 @@ Verified against the shipped scripts and data while building the engine (`src/`)
 - Fonts: 512×512 RGBA atlases, 16×16 grid of 32 px cells in Windows-1252 order, no width table.
   The game draws all its text monospace (see "Text" below); our proportional variant
   (widths measured from alpha) is only for this port's inventory label.
-- `scream --verify-media` decodes every asset: DC base 3357/3357, DC+update 3405/3405 OK.
+- `scream --verify-media` (`verify.cpp`) decodes every asset: DC base 3357/3357, DC+update
+  3405/3405, 2006 2835/2835 OK. Ogg files are first walked page by page (libogg checks each
+  page's CRC), since Theora and stb_vorbis skip damaged or missing pages without an error.
 - Of 2914 files the DC script references, 5 are missing from the archives; only `black.jpg`
   (zoom `kitchen-cellar`) is reachable, and renders black, which is presumably the intent.
 
