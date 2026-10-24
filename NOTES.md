@@ -47,7 +47,7 @@ Lua 5.1.1 (DC) / 5.0 (2006), IJG libjpeg, libogg/vorbis/theora.
 
 ## `.res` archive format
 
-Little-endian. See `tools/scream_res.py`.
+Little-endian. See `tools/scream_res.py`; every format is specified in `docs/formats.md`.
 
 ```
 0x000  char[256]  "SCream resource file\0" + uninitialized padding
@@ -129,6 +129,7 @@ Script structure (DC):
 
 ### API scope
 
+What every function does: `docs/api.md` (all 87, unused ones marked).
 `tools/api_usage.py` → `docs/api-usage-dc.md`, `docs/api-usage-2006.md` (counts, arities,
 constants per argument, examples). DC uses 64 of 87 registered functions; 2006 uses 55, all a
 subset of DC's. Never called by either:

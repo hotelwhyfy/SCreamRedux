@@ -91,6 +91,14 @@ tools/
   vendor/unluac.jar     Lua decompiler (gitignored)
 third_party/            lua-5.1.5 (lundump.c patched, see lundump-size_t.patch), stb,
                         libogg-1.3.6, libtheora-1.2.0; each has SOURCE.txt
+docs/api.md             clean-room spec: all 87 sc* functions, unused ones marked
+docs/formats.md         clean-room spec: .res, assets, scripts, scream.cfg, .srt; saves (appendix)
+docs/camera.md          clean-room spec: projection, mouse look, edge zones, keys, zooms
+docs/rendering.md       clean-room spec: frame composition, sky/fog/rain/lighting, crossfades
+docs/screens.md         clean-room spec: layouts of feedback, choices, inventory, journal, menu
+docs/input.md           clean-room spec: keys, mouse, cursors, hotspot picking
+docs/mainloop.md        clean-room spec: threads, main loop, states and transitions
+                        (all specs: original exe/scripts/data only, every claim sourced)
 docs/api-usage-*.md     generated API usage tables
 extracted/ (gitignored) unpacked game data, decompiled scripts, Ghidra project and dumps
 ```
